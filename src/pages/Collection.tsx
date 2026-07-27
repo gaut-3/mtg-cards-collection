@@ -555,12 +555,12 @@ function CardModal({ card, onClose }: { card: EnrichedCard; onClose: () => void 
       onClick={onClose}
     >
       <div
-        className="bg-gray-900 border border-gray-700 rounded-2xl max-w-lg w-full shadow-2xl flex flex-col sm:flex-row overflow-hidden"
+        className="bg-gray-900 border border-gray-700 rounded-2xl max-w-2xl w-full shadow-2xl flex flex-col sm:flex-row overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {card.imageUris?.normal && (
-          <div className="sm:w-52 shrink-0 flex items-start">
-            <img src={card.imageUris.normal} alt={card.name} className="w-full object-contain rounded-l-2xl" />
+          <div className="sm:w-64 shrink-0 bg-gray-950 flex items-center justify-center p-2">
+            <img src={card.imageUris.normal} alt={card.name} className="w-full h-full object-contain rounded-xl" />
           </div>
         )}
 
