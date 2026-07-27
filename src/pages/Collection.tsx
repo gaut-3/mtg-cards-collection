@@ -514,24 +514,40 @@ export default function Collection() {
 function CardTile({ card, onClick }: { card: EnrichedCard; onClick: () => void }) {
   const img = card.imageUris?.normal
   const price = cardPrice(card)
+  const inDeck = card.binderName && card.binderName !== 'cards'
 
   return (
     <div
       onClick={onClick}
       className="group cursor-pointer rounded-xl overflow-hidden bg-gray-900 border border-gray-800 hover:border-violet-600/50 transition shadow hover:shadow-violet-900/30"
     >
-      {img ? (
-        <img
-          src={img}
-          alt={card.name}
-          loading="lazy"
-          className="w-full object-cover aspect-[5/7] group-hover:scale-105 transition duration-300"
-        />
-      ) : (
-        <div className="w-full aspect-[5/7] bg-gray-800 flex items-center justify-center text-gray-600 text-xs p-2 text-center">
-          {card.name}
-        </div>
-      )}
+      <div className="relative">
+        {img ? (
+          <img
+            src={img}
+            alt={card.name}
+            loading="lazy"
+            className="w-full object-cover aspect-[5/7] group-hover:scale-105 transition duration-300"
+          />
+        ) : (
+          <div className="w-full aspect-[5/7] bg-gray-800 flex items-center justify-center text-gray-600 text-xs p-2 text-center">
+            {card.name}
+          </div>
+        )}
+        {inDeck && (
+          <div className="absolute bottom-1.5 left-1.5 right-1.5">
+            <span
+              className="flex items-center gap-1 bg-violet-700/90 backdrop-blur-sm text-white text-xs px-1.5 py-0.5 rounded-md font-medium truncate max-w-full"
+              title={card.binderName}
+            >
+              <svg className="w-2.5 h-2.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+              </svg>
+              <span className="truncate">{card.binderName}</span>
+            </span>
+          </div>
+        )}
+      </div>
       <div className="px-2 py-1.5">
         <p className={`text-xs font-medium truncate ${RARITY_COLORS[card.rarity] ?? 'text-gray-300'}`}>
           {card.rarity.charAt(0).toUpperCase() + card.rarity.slice(1)}
@@ -569,6 +585,16 @@ function CardModal({ card, onClose }: { card: EnrichedCard; onClose: () => void 
             <h2 className="text-white font-bold text-lg leading-tight">{card.name}</h2>
             <p className="text-gray-400 text-sm">{card.typeLine}</p>
           </div>
+
+          {/* Deck badge in modal */}
+          {card.binderName && card.binderName !== 'cards' && (
+            <div className="flex items-center gap-2 bg-violet-700/20 border border-violet-600/40 rounded-lg px-3 py-2">
+              <svg className="w-4 h-4 text-violet-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
+              </svg>
+              <span className="text-violet-300 text-sm font-medium">In deck: {card.binderName}</span>
+            </div>
+          )}
 
           {card.oracleText && (
             <p className="text-gray-300 text-sm leading-relaxed border-l-2 border-gray-700 pl-3">
