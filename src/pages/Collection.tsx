@@ -559,8 +559,8 @@ function CardModal({ card, onClose }: { card: EnrichedCard; onClose: () => void 
         onClick={(e) => e.stopPropagation()}
       >
         {card.imageUris?.normal && (
-          <div className="sm:w-52 shrink-0">
-            <img src={card.imageUris.normal} alt={card.name} className="w-full h-full object-cover" />
+          <div className="sm:w-52 shrink-0 flex items-start">
+            <img src={card.imageUris.normal} alt={card.name} className="w-full object-contain rounded-l-2xl" />
           </div>
         )}
 
