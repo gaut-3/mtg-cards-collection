@@ -16,24 +16,36 @@ paths:
     get:
       operationId: getMtgContext
       summary: Get the user's MTG collection and imported Moxfield decks
+      security:
+        - bearerAuth: []
       parameters:
         - name: include
           in: query
+          required: false
           schema:
             type: string
-            enum: [all, collection, decks]
+            enum:
+              - all
+              - collection
+              - decks
+            default: all
         - name: search
           in: query
+          required: false
           schema:
             type: string
         - name: deckId
           in: query
+          required: false
           schema:
             type: string
         - name: limit
           in: query
+          required: false
           schema:
             type: integer
+            default: 500
+            maximum: 2000
       responses:
         "200":
           description: MTG context
@@ -41,13 +53,50 @@ paths:
             application/json:
               schema:
                 type: object
+                properties:
+                  collection:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        quantity:
+                          type: integer
+                  moxfieldDecks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        cards:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name:
+                                type: string
+                              quantity:
+                                type: integer
+        "401":
+          description: Invalid or missing token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
 components:
+  schemas:
+    Empty:
+      type: object
+      properties: {}
   securitySchemes:
     bearerAuth:
       type: http
-      scheme: bearer
-security:
-  - bearerAuth: []`
+      scheme: bearer`
 
 export default function Settings() {
   const { user } = useAuthContext()
