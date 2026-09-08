@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
+import { Check, ChevronRight, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
@@ -107,6 +107,7 @@ export default function Moxfield() {
   const [editingDeckId, setEditingDeckId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [renameSaving, setRenameSaving] = useState(false)
+  const [collapsedDecks, setCollapsedDecks] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const payload = decodeImportPayload(window.location.hash)
@@ -160,6 +161,14 @@ export default function Moxfield() {
     const ok = await updateName(editingDeckId, editingName)
     setRenameSaving(false)
     if (ok) cancelRename()
+  }
+
+  const toggleCollapsed = (deckId: string) => {
+    setCollapsedDecks((prev) => {
+      const next = new Set(prev)
+      next.has(deckId) ? next.delete(deckId) : next.add(deckId)
+      return next
+    })
   }
 
   const renderDeckTitle = (deck: MoxfieldDeck, compact = false) => {
@@ -350,6 +359,13 @@ export default function Moxfield() {
           {filteredDecks.map((deck) => (
             <section key={deck.id}>
               <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => toggleCollapsed(deck.id)}
+                  className="text-gray-500 hover:text-white transition shrink-0"
+                  title={collapsedDecks.has(deck.id) ? 'Expand deck' : 'Collapse deck'}
+                >
+                  <ChevronRight className={`w-4 h-4 transition-transform ${collapsedDecks.has(deck.id) ? '' : 'rotate-90'}`} />
+                </button>
                 {renderDeckTitle(deck, true)}
                 <div className="flex-1 h-px bg-gray-800" />
                 <span className="text-gray-600 text-xs shrink-0">{deck.cards.length} cards</span>
@@ -363,7 +379,7 @@ export default function Moxfield() {
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>
-              <CardImageGrid cards={deck.cards} />
+              {!collapsedDecks.has(deck.id) && <CardImageGrid cards={deck.cards} />}
             </section>
           ))}
         </div>
@@ -374,8 +390,17 @@ export default function Moxfield() {
           {filteredDecks.map((deck) => (
             <section key={deck.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
               <div className="flex items-start justify-between gap-3 mb-3">
-                <div>
-                  {renderDeckTitle(deck)}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleCollapsed(deck.id)}
+                      className="text-gray-500 hover:text-white transition shrink-0"
+                      title={collapsedDecks.has(deck.id) ? 'Expand deck' : 'Collapse deck'}
+                    >
+                      <ChevronRight className={`w-4 h-4 transition-transform ${collapsedDecks.has(deck.id) ? '' : 'rotate-90'}`} />
+                    </button>
+                    {renderDeckTitle(deck)}
+                  </div>
                   <p className="text-gray-500 text-xs">
                     {deck.cards.length} cards{deck.format ? ` · ${deck.format}` : ''}
                   </p>
@@ -390,7 +415,7 @@ export default function Moxfield() {
                   <ExternalLink className="w-4 h-4" />
                 </a>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+              {!collapsedDecks.has(deck.id) && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                 {deck.cards.map((card, i) => (
                   <div key={`${card.name}-${card.board}-${i}`} className="flex items-center gap-2 text-sm rounded-lg bg-gray-950/60 px-3 py-2">
                     <span className="text-gray-500 text-xs w-7 shrink-0">×{card.quantity}</span>
@@ -402,7 +427,7 @@ export default function Moxfield() {
                     )}
                   </div>
                 ))}
-              </div>
+              </div>}
             </section>
           ))}
         </div>
