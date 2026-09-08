@@ -12,6 +12,7 @@ import Moxfield from './pages/Moxfield'
 import Mosaic from './pages/Mosaic'
 import Upload from './pages/Upload'
 import Builder from './pages/Builder' // DECK BUILDER — remove this line to disable feature
+import Settings from './pages/Settings'
 
 export default function App() {
   return (
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="/mosaic" element={<Mosaic />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/builder" element={<Builder />} /> {/* DECK BUILDER — remove to disable */}
+            <Route path="/settings" element={<Settings />} />
           </Route>
 
           {/* Default redirect */}

@@ -10,6 +10,7 @@ import {
   LogOut,
   Upload,
   Library,
+  Settings,
   Wand2,  // DECK BUILDER — remove this import to disable feature
 } from 'lucide-react'
 
@@ -22,6 +23,7 @@ const navItems = [
   { to: '/moxfield',   label: 'Moxfield',   icon: Library    },
   { to: '/mosaic',     label: 'Mosaic',     icon: Image      },
   { to: '/upload',     label: 'Upload CSV', icon: Upload     },
+  { to: '/settings',   label: 'Settings',   icon: Settings   },
 ]
 
 export function Navbar() {
