@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { ExternalLink, Image, Layers, Loader2, Plus, Search } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Copy, ExternalLink, Image, Layers, Loader2, Plus, Search } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
@@ -71,6 +71,28 @@ function filterDeck(deck: MoxfieldDeck, query: string): MoxfieldDeck | null {
   }
 }
 
+function decodeImportPayload(hash: string): { name?: string; url?: string; text?: string } | null {
+  if (!hash.startsWith('#moxfield-import=')) return null
+
+  try {
+    const encoded = hash.slice('#moxfield-import='.length)
+    const json = decodeURIComponent(escape(atob(encoded)))
+    return JSON.parse(json)
+  } catch {
+    return null
+  }
+}
+
+function bookmarkletCode(appUrl: string) {
+  return `javascript:(async()=>{const u=location.href;if(!new RegExp('moxfield\\\\.com/decks/','i').test(u)){alert('Open a Moxfield deck page first.');return}const name=(document.querySelector('h1')?.innerText||document.title.replace(/\\s*-\\s*Moxfield.*$/,'')||'Moxfield deck').trim();const id=(u.match(new RegExp('moxfield\\\\.com/decks/([^/?#]+)','i'))||[])[1];let text='';try{const r=await fetch('/v2/decks/all/'+id+'/export?arenaOnly=false&format=full&includeFinish=true&pricingProvider=cardkingdom&ignoreFlavorNames=false',{credentials:'include'});if(r.ok)text=await r.text()}catch(e){}if(!text.trim())text=prompt('Could not read the export automatically. Paste Moxfield export text here:')||'';if(!text.trim())return;const data=btoa(unescape(encodeURIComponent(JSON.stringify({name,url:u,text}))));location.href='${appUrl}/moxfield#moxfield-import='+data})()`
+}
+
+function currentAppUrl() {
+  return window.location.hostname === 'localhost'
+    ? 'https://mtg-cards-56fbc.web.app'
+    : window.location.origin
+}
+
 export default function Moxfield() {
   const { user } = useAuthContext()
   const { decks, loading, syncing, error, importFromText } = useMoxfieldDecks(user?.uid ?? null)
@@ -81,6 +103,18 @@ export default function Moxfield() {
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'decks' | 'images'>('images')
   const [lastImportName, setLastImportName] = useState('')
+  const [copiedBookmarklet, setCopiedBookmarklet] = useState(false)
+
+  useEffect(() => {
+    const payload = decodeImportPayload(window.location.hash)
+    if (!payload) return
+
+    setDeckName(payload.name ?? '')
+    setDeckUrl(payload.url ?? '')
+    setDeckText(payload.text ?? '')
+    setShowImport(true)
+    window.history.replaceState(null, '', window.location.pathname)
+  }, [])
 
   const filteredDecks = useMemo(
     () => decks.map((deck) => filterDeck(deck, search)).filter(Boolean) as MoxfieldDeck[],
@@ -99,6 +133,12 @@ export default function Moxfield() {
     setDeckUrl('')
     setDeckText('')
     setShowImport(false)
+  }
+
+  const handleCopyBookmarklet = async () => {
+    await navigator.clipboard.writeText(bookmarkletCode(currentAppUrl()))
+    setCopiedBookmarklet(true)
+    window.setTimeout(() => setCopiedBookmarklet(false), 2000)
   }
 
   return (
@@ -127,6 +167,23 @@ export default function Moxfield() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
           <h2 className="text-white font-medium mb-3">Import Moxfield Deck</h2>
           <div className="space-y-3">
+            <div className="rounded-lg border border-gray-800 bg-gray-950 p-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-white text-sm font-medium">One-click from Moxfield</p>
+                  <p className="text-gray-500 text-xs">
+                    Copy this bookmarklet, save it as a browser bookmark, then click it on a Moxfield deck page.
+                  </p>
+                </div>
+                <button
+                  onClick={handleCopyBookmarklet}
+                  className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-200 px-3 py-2 rounded-lg text-xs transition"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  {copiedBookmarklet ? 'Copied!' : 'Copy Bookmarklet'}
+                </button>
+              </div>
+            </div>
             <input
               value={deckName}
               onChange={(e) => setDeckName(e.target.value)}

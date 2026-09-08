@@ -5,6 +5,14 @@ import { parseDeckList } from '../lib/deckMatcher'
 import { lookupCardsByName } from '../lib/scryfallClient'
 import type { MoxfieldDeck } from '../types/moxfield'
 
+const SECTION_HEADERS = new Set([
+  'commander',
+  'commanders',
+  'mainboard',
+  'main deck',
+  'deck',
+])
+
 function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(
     Object.entries(obj)
@@ -18,6 +26,22 @@ function stripUndefined<T extends object>(obj: T): T {
           : value,
       ])
   ) as T
+}
+
+function normalizeMoxfieldExport(text: string) {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line) return false
+      if (/^\//.test(line)) return false
+      const cleaned = line.replace(/:$/, '').toLowerCase()
+      if (SECTION_HEADERS.has(cleaned)) return false
+      if (/^(sideboard|maybeboard|considering|tokens?|stickers?|attractions)$/i.test(cleaned)) return false
+      return /^\d+x?\s+/.test(line)
+    })
+    .map((line) => line.replace(/\s+\*F\*$/i, '').replace(/\s+\*E\*$/i, ''))
+    .join('\n')
 }
 
 export function useMoxfieldDecks(uid: string | null) {
@@ -58,7 +82,7 @@ export function useMoxfieldDecks(uid: string | null) {
   }) => {
     if (!uid) return null
     const trimmedName = name.trim()
-    const trimmedText = deckText.trim()
+    const trimmedText = normalizeMoxfieldExport(deckText)
     if (!trimmedName || !trimmedText) return null
 
     setSyncing(true)
