@@ -192,6 +192,22 @@ export default function Settings() {
         </div>
       </div>
 
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+        <h2 className="text-white font-semibold mb-3">Add This To A ChatGPT Action</h2>
+        <ol className="list-decimal list-inside space-y-2 text-sm text-gray-400">
+          <li>In ChatGPT, open your custom GPT and go to Configure.</li>
+          <li>Open Actions, then choose Create new action.</li>
+          <li>Set Authentication to API Key.</li>
+          <li>Set Auth Type to Bearer.</li>
+          <li>Paste only your generated token as the API key. Do not include the word Bearer.</li>
+          <li>Copy the schema below and paste it into the action schema editor.</li>
+          <li>Test the action with include set to collection and limit set to 20.</li>
+        </ol>
+        <p className="text-xs text-gray-500 mt-3">
+          The action should call /chatgptContext. The token generation and revoke endpoints are only used by this app.
+        </p>
+      </div>
+
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
         <div className="flex items-center justify-between gap-3 mb-3">
           <div>

@@ -256,6 +256,13 @@ export default function Moxfield() {
                   {copiedBookmarklet ? 'Copied!' : 'Copy Bookmarklet'}
                 </button>
               </div>
+              <ol className="list-decimal list-inside space-y-1 text-xs text-gray-500 mt-3">
+                <li>Click Copy Bookmarklet.</li>
+                <li>Create a new browser bookmark and paste the copied text into the bookmark URL.</li>
+                <li>Open a deck on Moxfield, preferably the edit page if the normal deck page cannot be read.</li>
+                <li>Click the bookmarklet. It redirects back here with the deck text ready to import.</li>
+                <li>If prompted, copy the deck text from Moxfield and paste it into the prompt.</li>
+              </ol>
             </div>
             <input
               value={deckName}
@@ -277,7 +284,7 @@ export default function Moxfield() {
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-violet-500 transition resize-none"
             />
             <p className="text-gray-600 text-xs">
-              Paste the exported Moxfield deck text. The first parsed card is marked as commander.
+              Manual import also works: enter a deck name, optionally paste the Moxfield URL, then paste exported deck text. The first parsed card is marked as commander.
             </p>
             <div className="flex gap-2">
               <button
