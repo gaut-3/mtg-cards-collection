@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { ExternalLink, Image, Layers, Loader2, RefreshCw, Search } from 'lucide-react'
+import { ExternalLink, Image, Layers, Loader2, Plus, Search } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
-import { getStoredMoxfieldUsername, useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
+import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
 
 function CardImageGrid({ cards }: { cards: MoxfieldDeckCard[] }) {
@@ -73,20 +73,32 @@ function filterDeck(deck: MoxfieldDeck, query: string): MoxfieldDeck | null {
 
 export default function Moxfield() {
   const { user } = useAuthContext()
-  const { decks, loading, syncing, error, sync } = useMoxfieldDecks(user?.uid ?? null)
-  const [username, setUsername] = useState(getStoredMoxfieldUsername)
+  const { decks, loading, syncing, error, importFromText } = useMoxfieldDecks(user?.uid ?? null)
+  const [showImport, setShowImport] = useState(decks.length === 0)
+  const [deckName, setDeckName] = useState('')
+  const [deckUrl, setDeckUrl] = useState('')
+  const [deckText, setDeckText] = useState('')
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'decks' | 'images'>('images')
-  const [lastSyncCount, setLastSyncCount] = useState<number | null>(null)
+  const [lastImportName, setLastImportName] = useState('')
 
   const filteredDecks = useMemo(
     () => decks.map((deck) => filterDeck(deck, search)).filter(Boolean) as MoxfieldDeck[],
     [decks, search]
   )
 
-  const handleSync = async () => {
-    const synced = await sync(username)
-    setLastSyncCount(synced.length)
+  const handleImport = async () => {
+    const imported = await importFromText({
+      name: deckName,
+      deckText,
+      publicUrl: deckUrl || undefined,
+    })
+    if (!imported) return
+    setLastImportName(imported.name)
+    setDeckName('')
+    setDeckUrl('')
+    setDeckText('')
+    setShowImport(false)
   }
 
   return (
@@ -97,34 +109,71 @@ export default function Moxfield() {
           <div>
             <h1 className="text-2xl font-bold text-white">Moxfield</h1>
             <p className="text-gray-400 text-sm">
-              Sync public Moxfield decks and search through them here.
+              Import Moxfield export text and search through your decks here.
             </p>
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Moxfield username"
-            className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
-          />
-          <button
-            onClick={handleSync}
-            disabled={syncing || !username.trim() || !user}
-            className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-          >
-            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-            {syncing ? 'Syncing…' : 'Sync Moxfield'}
-          </button>
-        </div>
+        <button
+          onClick={() => setShowImport((v) => !v)}
+          className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+        >
+          <Plus className="w-4 h-4" />
+          Import Deck
+        </button>
       </div>
 
-      {(error || lastSyncCount !== null) && (
+      {showImport && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <h2 className="text-white font-medium mb-3">Import Moxfield Deck</h2>
+          <div className="space-y-3">
+            <input
+              value={deckName}
+              onChange={(e) => setDeckName(e.target.value)}
+              placeholder="Deck name"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
+            />
+            <input
+              value={deckUrl}
+              onChange={(e) => setDeckUrl(e.target.value)}
+              placeholder="Moxfield deck URL (optional)"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
+            />
+            <textarea
+              value={deckText}
+              onChange={(e) => setDeckText(e.target.value)}
+              placeholder={'1 Commander Name\n1 Sol Ring\n1 Command Tower'}
+              rows={10}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-violet-500 transition resize-none"
+            />
+            <p className="text-gray-600 text-xs">
+              Paste the exported Moxfield deck text. The first parsed card is marked as commander.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={handleImport}
+                disabled={syncing || !deckName.trim() || !deckText.trim() || !user}
+                className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+              >
+                {syncing && <Loader2 className="w-4 h-4 animate-spin" />}
+                {syncing ? 'Importing…' : 'Import'}
+              </button>
+              <button
+                onClick={() => setShowImport(false)}
+                className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm transition"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(error || lastImportName) && (
         <div className="mb-4">
           {error && <p className="text-red-400 text-sm">{error}</p>}
-          {lastSyncCount !== null && !error && (
-            <p className="text-green-400 text-sm">Synced {lastSyncCount} public decks.</p>
+          {lastImportName && !error && (
+            <p className="text-green-400 text-sm">Imported {lastImportName}.</p>
           )}
         </div>
       )}
@@ -158,20 +207,20 @@ export default function Moxfield() {
       {loading && (
         <div className="flex items-center gap-2 text-gray-400 text-sm justify-center py-16">
           <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
-          Loading synced decks…
+          Loading imported decks…
         </div>
       )}
 
       {!loading && decks.length === 0 && (
         <div className="text-center py-16 text-gray-600">
           <Layers className="w-10 h-10 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No Moxfield decks synced yet.</p>
+          <p className="text-sm">No Moxfield decks imported yet.</p>
         </div>
       )}
 
       {!loading && decks.length > 0 && filteredDecks.length === 0 && (
         <div className="text-center py-16 text-gray-600">
-          <p className="text-sm">No synced Moxfield decks match your search.</p>
+          <p className="text-sm">No imported Moxfield decks match your search.</p>
         </div>
       )}
 

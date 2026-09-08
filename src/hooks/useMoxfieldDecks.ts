@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { collection, doc, getDocs, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import { fetchMoxfieldDecks } from '../lib/moxfieldClient'
+import { parseDeckList } from '../lib/deckMatcher'
+import { lookupCardsByName } from '../lib/scryfallClient'
 import type { MoxfieldDeck } from '../types/moxfield'
-
-const USERNAME_KEY = 'mtg-hub-moxfield-username'
 
 function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(
@@ -48,34 +47,62 @@ export function useMoxfieldDecks(uid: string | null) {
     load()
   }, [load])
 
-  const sync = useCallback(async (username: string) => {
-    if (!uid) return []
-    const trimmed = username.trim()
-    if (!trimmed) return []
+  const importFromText = useCallback(async ({
+    name,
+    deckText,
+    publicUrl,
+  }: {
+    name: string
+    deckText: string
+    publicUrl?: string
+  }) => {
+    if (!uid) return null
+    const trimmedName = name.trim()
+    const trimmedText = deckText.trim()
+    if (!trimmedName || !trimmedText) return null
 
     setSyncing(true)
     setError('')
     try {
-      localStorage.setItem(USERNAME_KEY, trimmed)
-      const synced = await fetchMoxfieldDecks(trimmed)
-      const batch = writeBatch(db)
-      for (const deck of synced) {
-        batch.set(doc(db, 'users', uid, 'moxfieldDecks', deck.id), stripUndefined(deck))
+      const lines = parseDeckList(trimmedText)
+      if (lines.length === 0) {
+        throw new Error('Could not parse any card lines. Use Moxfield exported text like "1 Sol Ring".')
       }
+
+      const scryfallMap = await lookupCardsByName(lines.map((line) => line.name))
+      const cards = lines.map((line, index) => {
+        const scryfallCard = scryfallMap.get(line.name.toLowerCase())
+        return {
+          name: line.name,
+          quantity: line.quantity,
+          board: index === 0 ? 'commander' as const : 'mainboard' as const,
+          scryfallId: scryfallCard?.id,
+          imageUriNormal: scryfallCard?.image_uris?.normal ?? scryfallCard?.card_faces?.[0]?.image_uris?.normal,
+        }
+      })
+
+      const id = publicUrl?.match(/moxfield\.com\/decks\/([^/?#]+)/i)?.[1] ?? `${Date.now()}`
+      const deck: MoxfieldDeck = {
+        id,
+        name: trimmedName,
+        publicUrl: publicUrl?.trim() || `https://www.moxfield.com/decks/${id}`,
+        deckText: lines.map((line) => `${line.quantity} ${line.name}`).join('\n'),
+        cards,
+        syncedAt: new Date().toISOString(),
+      }
+
+      const batch = writeBatch(db)
+      batch.set(doc(db, 'users', uid, 'moxfieldDecks', deck.id), stripUndefined(deck))
       await batch.commit()
       await load()
-      return synced
+      return deck
     } catch (e: any) {
-      setError(e.message ?? 'Failed to sync Moxfield decks.')
-      return []
+      setError(e.message ?? 'Failed to import Moxfield deck.')
+      return null
     } finally {
       setSyncing(false)
     }
   }, [load, uid])
 
-  return { decks, loading, syncing, error, load, sync }
-}
-
-export function getStoredMoxfieldUsername() {
-  return localStorage.getItem(USERNAME_KEY) ?? 'bashstar'
+  return { decks, loading, syncing, error, load, importFromText }
 }
