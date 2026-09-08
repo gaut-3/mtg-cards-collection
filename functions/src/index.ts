@@ -34,7 +34,7 @@ interface SyncedDeck {
   syncedAt: string
 }
 
-const MOXFIELD_API = 'https://api.moxfield.com/v2'
+const MOXFIELD_API = 'https://api2.moxfield.com'
 const MAX_DECKS = 100
 
 function setCors(res: Parameters<Parameters<typeof onRequest>[0]>[1]) {
@@ -142,8 +142,8 @@ export const syncMoxfieldDecks = onRequest(
 
     try {
       const listingUrls = [
-        `${MOXFIELD_API}/users/${encodeURIComponent(username)}/decks?pageNumber=1&pageSize=${MAX_DECKS}`,
-        `${MOXFIELD_API}/decks/search?pageNumber=1&pageSize=${MAX_DECKS}&authorUserName=${encodeURIComponent(username)}`,
+        `${MOXFIELD_API}/v2/decks/search-sfw?pageNumber=1&pageSize=${MAX_DECKS}&authorUserNames=${encodeURIComponent(username)}`,
+        `${MOXFIELD_API}/v2/decks/search?pageNumber=1&pageSize=${MAX_DECKS}&authorUserNames=${encodeURIComponent(username)}`,
       ]
 
       let summaries: Array<{ id: string; name?: string; publicUrl?: string; format?: string }> = []
@@ -164,7 +164,7 @@ export const syncMoxfieldDecks = onRequest(
 
       const decks: SyncedDeck[] = []
       for (const summary of summaries.slice(0, MAX_DECKS)) {
-        const detail = await fetchJson(`${MOXFIELD_API}/decks/all/${encodeURIComponent(summary.id)}`)
+        const detail = await fetchJson(`${MOXFIELD_API}/v3/decks/all/${encodeURIComponent(summary.id)}`)
         decks.push(normalizeDeck({ ...detail, ...summary }))
       }
 
