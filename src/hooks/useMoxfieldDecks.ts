@@ -13,6 +13,16 @@ const SECTION_HEADERS = new Set([
   'deck',
 ])
 
+const SKIP_SECTION_HEADERS = new Set([
+  'sideboard',
+  'maybeboard',
+  'considering',
+  'tokens',
+  'token',
+  'stickers',
+  'attractions',
+])
+
 function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(
     Object.entries(obj)
@@ -29,19 +39,28 @@ function stripUndefined<T extends object>(obj: T): T {
 }
 
 function normalizeMoxfieldExport(text: string) {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => {
-      if (!line) return false
-      if (/^\//.test(line)) return false
-      const cleaned = line.replace(/:$/, '').toLowerCase()
-      if (SECTION_HEADERS.has(cleaned)) return false
-      if (/^(sideboard|maybeboard|considering|tokens?|stickers?|attractions)$/i.test(cleaned)) return false
-      return /^\d+x?\s+/.test(line)
-    })
-    .map((line) => line.replace(/\s+\*F\*$/i, '').replace(/\s+\*E\*$/i, ''))
-    .join('\n')
+  const result: string[] = []
+  let skippingSection = false
+
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim()
+    if (!line || /^\//.test(line)) continue
+
+    const cleaned = line.replace(/:$/, '').toLowerCase()
+    if (SECTION_HEADERS.has(cleaned)) {
+      skippingSection = false
+      continue
+    }
+    if (SKIP_SECTION_HEADERS.has(cleaned)) {
+      skippingSection = true
+      continue
+    }
+    if (skippingSection || !/^\d+x?\s+/.test(line)) continue
+
+    result.push(line.replace(/\s+\*F\*$/i, '').replace(/\s+\*E\*$/i, ''))
+  }
+
+  return result.join('\n')
 }
 
 export function useMoxfieldDecks(uid: string | null) {
