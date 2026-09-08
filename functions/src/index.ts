@@ -1,7 +1,8 @@
-import { createHash } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore, FieldValue } from 'firebase-admin/firestore'
 import { onRequest } from 'firebase-functions/v2/https'
+import { HttpsError, onCall } from 'firebase-functions/v2/https'
 
 initializeApp()
 
@@ -19,6 +20,10 @@ function setCors(res: Parameters<Parameters<typeof onRequest>[0]>[1]) {
 
 function sha256(value: string) {
   return createHash('sha256').update(value).digest('hex')
+}
+
+function newToken() {
+  return `mtg_${randomBytes(32).toString('base64url')}`
 }
 
 function bearerToken(req: Parameters<Parameters<typeof onRequest>[0]>[0]) {
@@ -150,5 +155,55 @@ export const chatgptContext = onRequest(
     }
 
     res.json(response)
+  }
+)
+
+export const generateChatgptToken = onCall(
+  { region: 'europe-west6' },
+  async (request) => {
+    const uid = request.auth?.uid
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
+
+    const settingsRef = db.doc(`users/${uid}/settings/chatgpt`)
+    const existing = await settingsRef.get()
+    const existingHash = existing.data()?.tokenHash
+    if (typeof existingHash === 'string') {
+      await db.doc(`chatgptTokens/${existingHash}`).delete()
+    }
+
+    const token = newToken()
+    const tokenHash = sha256(token)
+    const data = {
+      uid,
+      enabled: true,
+      createdAt: FieldValue.serverTimestamp(),
+    }
+
+    await db.doc(`chatgptTokens/${tokenHash}`).set(data)
+    await settingsRef.set({
+      enabled: true,
+      tokenHash,
+      createdAt: FieldValue.serverTimestamp(),
+    })
+
+    return { token, tokenHash }
+  }
+)
+
+export const revokeChatgptToken = onCall(
+  { region: 'europe-west6' },
+  async (request) => {
+    const uid = request.auth?.uid
+    if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
+
+    const settingsRef = db.doc(`users/${uid}/settings/chatgpt`)
+    const existing = await settingsRef.get()
+    const tokenHash = existing.data()?.tokenHash
+    if (typeof tokenHash === 'string') {
+      await db.doc(`chatgptTokens/${tokenHash}`).delete()
+    }
+    await settingsRef.delete()
+
+    return { ok: true }
   }
 )

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
+import { getFunctions, httpsCallable } from 'firebase/functions'
 import { db } from '../lib/firebase'
 
 interface ChatGptSettings {
@@ -9,25 +10,7 @@ interface ChatGptSettings {
   lastUsedAt?: unknown
 }
 
-function base64Url(bytes: Uint8Array) {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-async function sha256(value: string) {
-  const encoded = new TextEncoder().encode(value)
-  const digest = await crypto.subtle.digest('SHA-256', encoded)
-  return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function newToken() {
-  const bytes = new Uint8Array(32)
-  crypto.getRandomValues(bytes)
-  return `mtg_${base64Url(bytes)}`
-}
+const functions = getFunctions(undefined, 'europe-west6')
 
 export function useChatGptToken(uid: string | null) {
   const [settings, setSettings] = useState<ChatGptSettings | null>(null)
@@ -59,25 +42,9 @@ export function useChatGptToken(uid: string | null) {
     setSaving(true)
     setError('')
     try {
-      if (settings?.tokenHash) {
-        await deleteDoc(doc(db, 'chatgptTokens', settings.tokenHash))
-      }
-
-      const token = newToken()
-      const tokenHash = await sha256(token)
-      const data = {
-        uid,
-        enabled: true,
-        createdAt: serverTimestamp(),
-      }
-
-      await setDoc(doc(db, 'chatgptTokens', tokenHash), data)
-      await setDoc(doc(db, 'users', uid, 'settings', 'chatgpt'), {
-        enabled: true,
-        tokenHash,
-        createdAt: serverTimestamp(),
-      })
-
+      const callable = httpsCallable(functions, 'generateChatgptToken')
+      const result = await callable()
+      const { token, tokenHash } = result.data as { token: string; tokenHash: string }
       setSettings({ enabled: true, tokenHash })
       setGeneratedToken(token)
       return token
@@ -87,15 +54,15 @@ export function useChatGptToken(uid: string | null) {
     } finally {
       setSaving(false)
     }
-  }, [settings?.tokenHash, uid])
+  }, [uid])
 
   const revoke = useCallback(async () => {
     if (!uid || !settings?.tokenHash) return
     setSaving(true)
     setError('')
     try {
-      await deleteDoc(doc(db, 'chatgptTokens', settings.tokenHash))
-      await deleteDoc(doc(db, 'users', uid, 'settings', 'chatgpt'))
+      const callable = httpsCallable(functions, 'revokeChatgptToken')
+      await callable()
       setSettings(null)
       setGeneratedToken('')
     } catch (e: any) {
