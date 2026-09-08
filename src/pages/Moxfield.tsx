@@ -77,7 +77,10 @@ export default function Moxfield() {
   const [showImport, setShowImport] = useState(decks.length === 0)
   const [deckName, setDeckName] = useState('')
   const [deckUrl, setDeckUrl] = useState('')
+  const [exportUrl, setExportUrl] = useState('')
   const [deckText, setDeckText] = useState('')
+  const [fetchingExport, setFetchingExport] = useState(false)
+  const [exportError, setExportError] = useState('')
   const [search, setSearch] = useState('')
   const [view, setView] = useState<'decks' | 'images'>('images')
   const [lastImportName, setLastImportName] = useState('')
@@ -86,6 +89,39 @@ export default function Moxfield() {
     () => decks.map((deck) => filterDeck(deck, search)).filter(Boolean) as MoxfieldDeck[],
     [decks, search]
   )
+
+  const handleFetchExport = async () => {
+    const trimmedUrl = exportUrl.trim()
+    if (!trimmedUrl) return
+
+    setFetchingExport(true)
+    setExportError('')
+    try {
+      const res = await fetch(trimmedUrl, {
+        headers: { Accept: 'text/plain,*/*' },
+      })
+      if (!res.ok) {
+        throw new Error(`Moxfield returned ${res.status}`)
+      }
+
+      const text = await res.text()
+      if (!text.trim()) {
+        throw new Error('Moxfield export returned no text.')
+      }
+
+      setDeckText(text.trim())
+      const deckId = trimmedUrl.match(/moxfield\.com\/v\d+\/decks\/all\/([^/?#]+)/i)?.[1]
+      if (deckId && !deckUrl.trim()) {
+        setDeckUrl(`https://www.moxfield.com/decks/${deckId}`)
+      }
+    } catch (e: any) {
+      setExportError(
+        `${e.message ?? 'Could not fetch the export URL.'} If the URL opens in your browser, copy the printed decklist and paste it below.`
+      )
+    } finally {
+      setFetchingExport(false)
+    }
+  }
 
   const handleImport = async () => {
     const imported = await importFromText({
@@ -97,7 +133,9 @@ export default function Moxfield() {
     setLastImportName(imported.name)
     setDeckName('')
     setDeckUrl('')
+    setExportUrl('')
     setDeckText('')
+    setExportError('')
     setShowImport(false)
   }
 
@@ -136,9 +174,26 @@ export default function Moxfield() {
             <input
               value={deckUrl}
               onChange={(e) => setDeckUrl(e.target.value)}
-              placeholder="Moxfield deck URL (optional)"
+              placeholder="Moxfield deck page URL (optional)"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
             />
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={exportUrl}
+                onChange={(e) => setExportUrl(e.target.value)}
+                placeholder="Moxfield export URL (optional)"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
+              />
+              <button
+                onClick={handleFetchExport}
+                disabled={fetchingExport || !exportUrl.trim()}
+                className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 px-4 py-2 rounded-lg text-sm transition"
+              >
+                {fetchingExport && <Loader2 className="w-4 h-4 animate-spin" />}
+                {fetchingExport ? 'Fetching…' : 'Fetch Export URL'}
+              </button>
+            </div>
+            {exportError && <p className="text-red-400 text-xs">{exportError}</p>}
             <textarea
               value={deckText}
               onChange={(e) => setDeckText(e.target.value)}
@@ -147,7 +202,7 @@ export default function Moxfield() {
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-violet-500 transition resize-none"
             />
             <p className="text-gray-600 text-xs">
-              Paste the exported Moxfield deck text. The first parsed card is marked as commander.
+              Fetch a Moxfield export URL or paste the exported deck text. The first parsed card is marked as commander.
             </p>
             <div className="flex gap-2">
               <button
