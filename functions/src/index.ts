@@ -9,6 +9,14 @@ initializeApp()
 const db = getFirestore()
 const MAX_LIMIT = 2000
 const DEFAULT_LIMIT = 500
+const callableOptions = {
+  region: 'europe-west6',
+  cors: [
+    'https://mtg-cards-56fbc.web.app',
+    'https://mtg-cards-56fbc.firebaseapp.com',
+    'http://localhost:5173',
+  ],
+}
 
 type Include = 'all' | 'collection' | 'decks'
 
@@ -159,7 +167,7 @@ export const chatgptContext = onRequest(
 )
 
 export const generateChatgptToken = onCall(
-  { region: 'europe-west6' },
+  callableOptions,
   async (request) => {
     const uid = request.auth?.uid
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')
@@ -191,7 +199,7 @@ export const generateChatgptToken = onCall(
 )
 
 export const revokeChatgptToken = onCall(
-  { region: 'europe-west6' },
+  callableOptions,
   async (request) => {
     const uid = request.auth?.uid
     if (!uid) throw new HttpsError('unauthenticated', 'Sign in first.')

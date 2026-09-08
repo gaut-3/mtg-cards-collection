@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { doc, getDoc } from 'firebase/firestore'
 import { getFunctions, httpsCallable } from 'firebase/functions'
-import { db } from '../lib/firebase'
+import { app, db } from '../lib/firebase'
 
 interface ChatGptSettings {
   enabled: boolean
@@ -10,7 +10,7 @@ interface ChatGptSettings {
   lastUsedAt?: unknown
 }
 
-const functions = getFunctions(undefined, 'europe-west6')
+const functions = getFunctions(app, 'europe-west6')
 
 export function useChatGptToken(uid: string | null) {
   const [settings, setSettings] = useState<ChatGptSettings | null>(null)
