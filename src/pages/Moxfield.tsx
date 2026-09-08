@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, ExternalLink, Image, Layers, Loader2, Plus, Search } from 'lucide-react'
+import { Check, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
@@ -95,7 +95,7 @@ function currentAppUrl() {
 
 export default function Moxfield() {
   const { user } = useAuthContext()
-  const { decks, loading, syncing, error, importFromText } = useMoxfieldDecks(user?.uid ?? null)
+  const { decks, loading, syncing, error, importFromText, updateName } = useMoxfieldDecks(user?.uid ?? null)
   const [showImport, setShowImport] = useState(decks.length === 0)
   const [deckName, setDeckName] = useState('')
   const [deckUrl, setDeckUrl] = useState('')
@@ -104,6 +104,9 @@ export default function Moxfield() {
   const [view, setView] = useState<'decks' | 'images'>('images')
   const [lastImportName, setLastImportName] = useState('')
   const [copiedBookmarklet, setCopiedBookmarklet] = useState(false)
+  const [editingDeckId, setEditingDeckId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [renameSaving, setRenameSaving] = useState(false)
 
   useEffect(() => {
     const payload = decodeImportPayload(window.location.hash)
@@ -141,6 +144,67 @@ export default function Moxfield() {
     window.setTimeout(() => setCopiedBookmarklet(false), 2000)
   }
 
+  const startRename = (deck: MoxfieldDeck) => {
+    setEditingDeckId(deck.id)
+    setEditingName(deck.name)
+  }
+
+  const cancelRename = () => {
+    setEditingDeckId(null)
+    setEditingName('')
+  }
+
+  const saveRename = async () => {
+    if (!editingDeckId || !editingName.trim()) return
+    setRenameSaving(true)
+    const ok = await updateName(editingDeckId, editingName)
+    setRenameSaving(false)
+    if (ok) cancelRename()
+  }
+
+  const renderDeckTitle = (deck: MoxfieldDeck, compact = false) => {
+    if (editingDeckId === deck.id) {
+      return (
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <input
+            value={editingName}
+            onChange={(e) => setEditingName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') saveRename()
+              if (e.key === 'Escape') cancelRename()
+            }}
+            className="min-w-0 flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-violet-500"
+            autoFocus
+          />
+          <button
+            onClick={saveRename}
+            disabled={renameSaving || !editingName.trim()}
+            className="text-green-400 hover:text-green-300 disabled:opacity-50 transition p-1"
+            title="Save name"
+          >
+            {renameSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          </button>
+          <button onClick={cancelRename} className="text-gray-500 hover:text-white transition p-1" title="Cancel">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )
+    }
+
+    return (
+      <div className="flex items-center gap-2 min-w-0">
+        <h2 className={`text-white font-semibold truncate ${compact ? 'text-sm' : ''}`}>{deck.name}</h2>
+        <button
+          onClick={() => startRename(deck)}
+          className="text-gray-600 hover:text-violet-400 transition shrink-0"
+          title="Edit deck name"
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-6xl">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
@@ -169,7 +233,7 @@ export default function Moxfield() {
           <div className="space-y-3">
             <div className="rounded-lg border border-gray-800 bg-gray-950 p-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-white text-sm font-medium">One-click from Moxfield</p>
                   <p className="text-gray-500 text-xs">
                     Copy this bookmarklet, save it as a browser bookmark, then click it on a Moxfield deck page.
@@ -286,7 +350,7 @@ export default function Moxfield() {
           {filteredDecks.map((deck) => (
             <section key={deck.id}>
               <div className="flex items-center gap-3 mb-3">
-                <h2 className="text-white font-semibold text-sm">{deck.name}</h2>
+                {renderDeckTitle(deck, true)}
                 <div className="flex-1 h-px bg-gray-800" />
                 <span className="text-gray-600 text-xs shrink-0">{deck.cards.length} cards</span>
                 <a
@@ -311,7 +375,7 @@ export default function Moxfield() {
             <section key={deck.id} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
               <div className="flex items-start justify-between gap-3 mb-3">
                 <div>
-                  <h2 className="text-white font-semibold">{deck.name}</h2>
+                  {renderDeckTitle(deck)}
                   <p className="text-gray-500 text-xs">
                     {deck.cards.length} cards{deck.format ? ` · ${deck.format}` : ''}
                   </p>

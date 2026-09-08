@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { collection, doc, getDocs, writeBatch } from 'firebase/firestore'
+import { collection, doc, getDocs, setDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { parseDeckList } from '../lib/deckMatcher'
 import { lookupCardsByName } from '../lib/scryfallClient'
@@ -22,6 +22,8 @@ const SKIP_SECTION_HEADERS = new Set([
   'stickers',
   'attractions',
 ])
+
+const MOXFIELD_DECKS_KEY = 'mtg-hub-moxfield-decks'
 
 function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(
@@ -63,6 +65,20 @@ function normalizeMoxfieldExport(text: string) {
   return result.join('\n')
 }
 
+function saveCachedDecks(decks: MoxfieldDeck[]) {
+  localStorage.setItem(MOXFIELD_DECKS_KEY, JSON.stringify(decks))
+}
+
+function readCachedDecks(): MoxfieldDeck[] {
+  const cached = localStorage.getItem(MOXFIELD_DECKS_KEY)
+  if (!cached) return []
+  try {
+    return JSON.parse(cached) as MoxfieldDeck[]
+  } catch {
+    return []
+  }
+}
+
 export function useMoxfieldDecks(uid: string | null) {
   const [decks, setDecks] = useState<MoxfieldDeck[]>([])
   const [loading, setLoading] = useState(false)
@@ -70,6 +86,9 @@ export function useMoxfieldDecks(uid: string | null) {
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
+    const cached = readCachedDecks()
+    if (cached.length > 0) setDecks(cached)
+
     if (!uid) return
     setLoading(true)
     setError('')
@@ -79,6 +98,7 @@ export function useMoxfieldDecks(uid: string | null) {
         .map((d) => d.data() as MoxfieldDeck)
         .sort((a, b) => a.name.localeCompare(b.name))
       setDecks(loaded)
+      saveCachedDecks(loaded)
     } catch (e: any) {
       setError(e.message ?? 'Failed to load Moxfield decks.')
     } finally {
@@ -137,7 +157,12 @@ export function useMoxfieldDecks(uid: string | null) {
       const batch = writeBatch(db)
       batch.set(doc(db, 'users', uid, 'moxfieldDecks', deck.id), stripUndefined(deck))
       await batch.commit()
-      await load()
+      setDecks((prev) => {
+        const next = [...prev.filter((d) => d.id !== deck.id), deck]
+          .sort((a, b) => a.name.localeCompare(b.name))
+        saveCachedDecks(next)
+        return next
+      })
       return deck
     } catch (e: any) {
       setError(e.message ?? 'Failed to import Moxfield deck.')
@@ -147,5 +172,32 @@ export function useMoxfieldDecks(uid: string | null) {
     }
   }, [load, uid])
 
-  return { decks, loading, syncing, error, load, importFromText }
+  const updateName = useCallback(async (deckId: string, name: string) => {
+    if (!uid) return false
+    const trimmedName = name.trim()
+    if (!deckId || !trimmedName) return false
+
+    setDecks((prev) => {
+      const next = prev
+        .map((deck) => deck.id === deckId ? { ...deck, name: trimmedName } : deck)
+        .sort((a, b) => a.name.localeCompare(b.name))
+      saveCachedDecks(next)
+      return next
+    })
+
+    try {
+      await setDoc(
+        doc(db, 'users', uid, 'moxfieldDecks', deckId),
+        { name: trimmedName },
+        { merge: true }
+      )
+      return true
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to rename Moxfield deck.')
+      await load()
+      return false
+    }
+  }, [load, uid])
+
+  return { decks, loading, syncing, error, load, importFromText, updateName }
 }
