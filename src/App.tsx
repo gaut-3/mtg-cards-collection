@@ -8,6 +8,7 @@ import Collection from './pages/Collection'
 import Dashboard from './pages/Dashboard'
 import Decks from './pages/Decks'
 import Wishlist from './pages/Wishlist'
+import Moxfield from './pages/Moxfield'
 import Mosaic from './pages/Mosaic'
 import Upload from './pages/Upload'
 import Builder from './pages/Builder' // DECK BUILDER — remove this line to disable feature
@@ -33,6 +34,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/decks" element={<Decks />} />
             <Route path="/wishlist" element={<Wishlist />} />
+            <Route path="/moxfield" element={<Moxfield />} />
             <Route path="/mosaic" element={<Mosaic />} />
             <Route path="/upload" element={<Upload />} />
             <Route path="/builder" element={<Builder />} /> {/* DECK BUILDER — remove to disable */}

@@ -9,6 +9,7 @@ import {
   Image,
   LogOut,
   Upload,
+  Library,
   Wand2,  // DECK BUILDER — remove this import to disable feature
 } from 'lucide-react'
 
@@ -18,6 +19,7 @@ const navItems = [
   { to: '/decks',      label: 'Decks',      icon: Layers     },
   { to: '/builder',    label: 'Builder',    icon: Wand2      }, // DECK BUILDER — remove this line to disable feature
   { to: '/wishlist',   label: 'Wishlist',   icon: BookMarked },
+  { to: '/moxfield',   label: 'Moxfield',   icon: Library    },
   { to: '/mosaic',     label: 'Mosaic',     icon: Image      },
   { to: '/upload',     label: 'Upload CSV', icon: Upload     },
 ]

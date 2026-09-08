@@ -380,6 +380,62 @@ function OwnedRow({ name, quantity, haveQuantity, imageUriNormal, scryfallId }: 
   )
 }
 
+function WishlistImageGrid({
+  cards,
+}: {
+  cards: Array<{
+    name: string
+    quantity: number
+    imageUriNormal?: string
+    scryfallId?: string
+  }>
+}) {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">
+      {cards.map((card, i) => {
+        const tile = card.imageUriNormal ? (
+          <img
+            src={card.imageUriNormal}
+            alt={card.name}
+            className="w-full rounded-lg shadow-lg transition duration-200 group-hover:scale-[1.03]"
+            loading="lazy"
+          />
+        ) : (
+          <div className="aspect-[5/7] rounded-lg bg-gray-800 border border-gray-700 flex items-center justify-center p-2">
+            <span className="text-gray-500 text-xs text-center">{card.name}</span>
+          </div>
+        )
+
+        return (
+          <div key={`${card.name}-${i}`} className="group">
+            <div className="relative">
+              {card.scryfallId ? (
+                <a
+                  href={`https://scryfall.com/card/${card.scryfallId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={card.name}
+                  className="block"
+                >
+                  {tile}
+                </a>
+              ) : (
+                <div title={card.name}>{tile}</div>
+              )}
+              <div className="absolute right-1.5 bottom-1.5 rounded-full bg-black/85 px-2 py-0.5 text-xs font-bold text-white shadow">
+                ×{card.quantity}
+              </div>
+            </div>
+            <p className="mt-1.5 text-xs text-gray-300 leading-tight line-clamp-2" title={card.name}>
+              {card.name}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -392,10 +448,14 @@ export default function Wishlist() {
   const [name, setName] = useState('')
   const [deckText, setDeckText] = useState('')
   const [saving, setSaving] = useState(false)
+  const [pageView, setPageView] = useState<'lists' | 'images'>('lists')
+  const [imageScope, setImageScope] = useState<'missing' | 'owned' | 'all'>('missing')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [diffs, setDiffs] = useState<Record<string, DeckDiffResult>>({})
   const [analyzing, setAnalyzing] = useState<string | null>(null)
+  const [analyzingAll, setAnalyzingAll] = useState(false)
   const [tab, setTab] = useState<Record<string, 'missing' | 'owned'>>({})
+  const [viewMode, setViewMode] = useState<Record<string, 'details' | 'images'>>({})
   const [chfRate, setChfRate] = useState(0.95)
 
   // Edit state
@@ -488,6 +548,35 @@ export default function Wishlist() {
     }
   }
 
+  useEffect(() => {
+    if (pageView !== 'images' || wishlists.length === 0) return
+
+    const missingDiffs = wishlists.filter((wl) => !diffs[wl.id])
+    if (missingDiffs.length === 0) return
+
+    let cancelled = false
+    const loadAllDiffs = async () => {
+      setAnalyzingAll(true)
+      try {
+        for (const wl of missingDiffs) {
+          const lines = parseDeckList(wl.deckText)
+          const result = await buildDeckDiff(lines, cards)
+          if (cancelled) return
+          setDiffs((prev) => ({ ...prev, [wl.id]: result }))
+          setTab((prev) => ({ ...prev, [wl.id]: prev[wl.id] ?? 'missing' }))
+        }
+      } finally {
+        if (!cancelled) setAnalyzingAll(false)
+      }
+    }
+
+    loadAllDiffs()
+
+    return () => {
+      cancelled = true
+    }
+  }, [cards, diffs, pageView, wishlists])
+
   // Called by each MissingCardPanel when its printings finish loading
   const handlePrintingsEnriched = useCallback(
     (wlId: string, updated: DeckDiffMissingEntry) => {
@@ -529,6 +618,44 @@ export default function Wishlist() {
           New
         </button>
       </div>
+
+      {wishlists.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
+            {(['lists', 'images'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setPageView(mode)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                  pageView === mode
+                    ? 'bg-violet-600 text-white'
+                    : 'text-gray-500 hover:text-white'
+                }`}
+              >
+                {mode === 'lists' ? 'Lists' : 'All Images'}
+              </button>
+            ))}
+          </div>
+
+          {pageView === 'images' && (
+            <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
+              {(['missing', 'owned', 'all'] as const).map((scope) => (
+                <button
+                  key={scope}
+                  onClick={() => setImageScope(scope)}
+                  className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition ${
+                    imageScope === scope
+                      ? 'bg-violet-600/20 text-violet-300 border border-violet-600/40'
+                      : 'text-gray-500 hover:text-white border border-transparent'
+                  }`}
+                >
+                  {scope}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* New wishlist form */}
       {showNew && (
@@ -578,13 +705,60 @@ export default function Wishlist() {
         </div>
       )}
 
+      {pageView === 'images' && wishlists.length > 0 && (
+        <div className="space-y-8">
+          {analyzingAll && (
+            <div className="flex items-center gap-2 text-gray-400 text-sm justify-center py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+              Loading wishlist images…
+            </div>
+          )}
+
+          {wishlists.map((wl) => {
+            const diff = diffs[wl.id]
+            const imageCards = diff
+              ? imageScope === 'missing'
+                ? diff.missing
+                : imageScope === 'owned'
+                ? diff.owned
+                : [...diff.missing, ...diff.owned]
+              : []
+
+            return (
+              <section key={wl.id}>
+                <div className="flex items-center gap-3 mb-3">
+                  <h2 className="text-white font-semibold text-sm">{wl.name}</h2>
+                  <div className="flex-1 h-px bg-gray-800" />
+                  {diff && (
+                    <span className="text-gray-600 text-xs shrink-0">
+                      {imageCards.length} cards
+                    </span>
+                  )}
+                </div>
+
+                {!diff ? (
+                  <div className="h-32 rounded-xl border border-gray-800 bg-gray-900 flex items-center justify-center text-gray-500 text-sm">
+                    Preparing images…
+                  </div>
+                ) : imageCards.length > 0 ? (
+                  <WishlistImageGrid cards={imageCards} />
+                ) : (
+                  <p className="text-gray-600 text-sm py-4">No cards for this filter.</p>
+                )}
+              </section>
+            )
+          })}
+        </div>
+      )}
+
       {/* Wishlist items */}
-      <div className="space-y-4">
+      {pageView === 'lists' && <div className="space-y-4">
         {wishlists.map((wl) => {
           const diff = diffs[wl.id]
           const isExpanded = expanded === wl.id
           const isAnalyzing = analyzing === wl.id
           const currentTab = tab[wl.id] ?? 'missing'
+          const currentViewMode = viewMode[wl.id] ?? 'details'
 
           return (
             <div key={wl.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -696,8 +870,8 @@ export default function Wishlist() {
                         />
                       </div>
 
-                      {/* Tabs + expand/collapse all */}
-                      <div className="flex gap-2 mb-4 items-center">
+                      {/* Tabs + display mode */}
+                      <div className="flex gap-2 mb-4 items-center flex-wrap">
                         {(['missing', 'owned'] as const).map((t) => (
                           <button
                             key={t}
@@ -714,7 +888,23 @@ export default function Wishlist() {
                           </button>
                         ))}
 
-                        {currentTab === 'missing' && diff.missing.length > 0 && (
+                        <div className="flex gap-1 ml-auto bg-gray-950 border border-gray-800 rounded-lg p-1">
+                          {(['details', 'images'] as const).map((mode) => (
+                            <button
+                              key={mode}
+                              onClick={() => setViewMode((prev) => ({ ...prev, [wl.id]: mode }))}
+                              className={`px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                                currentViewMode === mode
+                                  ? 'bg-violet-600 text-white'
+                                  : 'text-gray-500 hover:text-white'
+                              }`}
+                            >
+                              {mode === 'details' ? 'Details' : 'Images'}
+                            </button>
+                          ))}
+                        </div>
+
+                        {currentViewMode === 'details' && currentTab === 'missing' && diff.missing.length > 0 && (
                           <button
                             onClick={() => {
                               const wlExpanded = expandedCards[wl.id] ?? new Set()
@@ -740,7 +930,7 @@ export default function Wishlist() {
                                 .join('\n')
                               navigator.clipboard.writeText(text)
                             }}
-                            className="ml-auto flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition"
+                            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-white transition"
                           >
                             <ShoppingCart className="w-3.5 h-3.5" />
                             Copy buy list
@@ -749,7 +939,7 @@ export default function Wishlist() {
                       </div>
 
                       {/* Missing — rich card panels */}
-                      {currentTab === 'missing' && (
+                      {currentTab === 'missing' && currentViewMode === 'details' && (
                         <div className="space-y-3">
                           {diff.missing.length === 0 && (
                             <p className="text-green-400 text-sm font-medium py-4 text-center">
@@ -771,8 +961,20 @@ export default function Wishlist() {
                         </div>
                       )}
 
+                      {currentTab === 'missing' && currentViewMode === 'images' && (
+                        <div>
+                          {diff.missing.length === 0 ? (
+                            <p className="text-green-400 text-sm font-medium py-4 text-center">
+                              You own all cards in this wishlist!
+                            </p>
+                          ) : (
+                            <WishlistImageGrid cards={diff.missing} />
+                          )}
+                        </div>
+                      )}
+
                       {/* Owned — compact rows */}
-                      {currentTab === 'owned' && (
+                      {currentTab === 'owned' && currentViewMode === 'details' && (
                         <div className="space-y-1.5">
                           {diff.owned.map((entry, i) => (
                             <OwnedRow
@@ -786,6 +988,10 @@ export default function Wishlist() {
                           ))}
                         </div>
                       )}
+
+                      {currentTab === 'owned' && currentViewMode === 'images' && (
+                        <WishlistImageGrid cards={diff.owned} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -793,7 +999,7 @@ export default function Wishlist() {
             </div>
           )
         })}
-      </div>
+      </div>}
 
       {/* CHF disclaimer */}
       {Object.keys(diffs).length > 0 && (
