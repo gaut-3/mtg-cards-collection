@@ -436,6 +436,40 @@ function WishlistImageGrid({
   )
 }
 
+type PackedWishlistCard = {
+  key: string
+  name: string
+  quantity: number
+  wishlistNames: string[]
+  printing?: ScryfallPrinting
+}
+
+async function enrichMissingCard(entry: DeckDiffMissingEntry) {
+  return await new Promise<DeckDiffMissingEntry>((resolve) => {
+    enrichWithPrintings(entry, resolve)
+  })
+}
+
+function packKey(name: string, printing?: ScryfallPrinting) {
+  return printing
+    ? `${printing.setCode}:${printing.collectorNumber}:${name}`
+    : `unknown:${name}`
+}
+
+function packLabel(pack: PackedWishlistCard) {
+  if (!pack.printing) return 'Unknown printing'
+  return `${pack.printing.setName} (${pack.printing.setCode.toUpperCase()} #${pack.printing.collectorNumber})`
+}
+
+function packCopyText(packs: PackedWishlistCard[]) {
+  return packs
+    .map((pack) => {
+      const source = pack.wishlistNames.join(', ')
+      return `${packLabel(pack)}\n${pack.quantity} ${pack.name} — ${source}`
+    })
+    .join('\n\n')
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -448,12 +482,14 @@ export default function Wishlist() {
   const [name, setName] = useState('')
   const [deckText, setDeckText] = useState('')
   const [saving, setSaving] = useState(false)
-  const [pageView, setPageView] = useState<'lists' | 'images'>('lists')
+  const [pageView, setPageView] = useState<'lists' | 'images' | 'packs'>('lists')
   const [imageScope, setImageScope] = useState<'missing' | 'owned' | 'all'>('missing')
   const [expanded, setExpanded] = useState<string | null>(null)
   const [diffs, setDiffs] = useState<Record<string, DeckDiffResult>>({})
   const [analyzing, setAnalyzing] = useState<string | null>(null)
   const [analyzingAll, setAnalyzingAll] = useState(false)
+  const [packingAll, setPackingAll] = useState(false)
+  const [packedCards, setPackedCards] = useState<PackedWishlistCard[]>([])
   const [tab, setTab] = useState<Record<string, 'missing' | 'owned'>>({})
   const [viewMode, setViewMode] = useState<Record<string, 'details' | 'images'>>({})
   const [chfRate, setChfRate] = useState(0.95)
@@ -577,6 +613,67 @@ export default function Wishlist() {
     }
   }, [cards, diffs, pageView, wishlists])
 
+  useEffect(() => {
+    if (pageView !== 'packs' || wishlists.length === 0) return
+
+    let cancelled = false
+    const buildPacks = async () => {
+      setPackingAll(true)
+      try {
+        const grouped = new Map<string, PackedWishlistCard>()
+
+        for (const wl of wishlists) {
+          const diff = diffs[wl.id] ?? await buildDeckDiff(parseDeckList(wl.deckText), cards)
+          if (cancelled) return
+
+          if (!diffs[wl.id]) {
+            setDiffs((prev) => ({ ...prev, [wl.id]: diff }))
+          }
+
+          for (const missing of diff.missing) {
+            const enriched = missing.allPrintings === undefined
+              ? await enrichMissingCard(missing)
+              : missing
+            if (cancelled) return
+
+            const printing = enriched.allPrintings?.[0]
+            const key = packKey(enriched.name, printing)
+            const existing = grouped.get(key)
+            if (existing) {
+              existing.quantity += enriched.quantity
+              if (!existing.wishlistNames.includes(wl.name)) {
+                existing.wishlistNames.push(wl.name)
+              }
+            } else {
+              grouped.set(key, {
+                key,
+                name: enriched.name,
+                quantity: enriched.quantity,
+                wishlistNames: [wl.name],
+                printing,
+              })
+            }
+          }
+        }
+
+        setPackedCards(
+          Array.from(grouped.values()).sort((a, b) => {
+            const setCompare = packLabel(a).localeCompare(packLabel(b))
+            return setCompare || a.name.localeCompare(b.name)
+          })
+        )
+      } finally {
+        if (!cancelled) setPackingAll(false)
+      }
+    }
+
+    buildPacks()
+
+    return () => {
+      cancelled = true
+    }
+  }, [cards, diffs, pageView, wishlists])
+
   // Called by each MissingCardPanel when its printings finish loading
   const handlePrintingsEnriched = useCallback(
     (wlId: string, updated: DeckDiffMissingEntry) => {
@@ -622,7 +719,7 @@ export default function Wishlist() {
       {wishlists.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-lg p-1">
-            {(['lists', 'images'] as const).map((mode) => (
+            {(['lists', 'images', 'packs'] as const).map((mode) => (
               <button
                 key={mode}
                 onClick={() => setPageView(mode)}
@@ -632,7 +729,7 @@ export default function Wishlist() {
                     : 'text-gray-500 hover:text-white'
                 }`}
               >
-                {mode === 'lists' ? 'Lists' : 'All Images'}
+                {mode === 'lists' ? 'Lists' : mode === 'images' ? 'All Images' : 'Packs'}
               </button>
             ))}
           </div>
@@ -746,6 +843,89 @@ export default function Wishlist() {
                   <p className="text-gray-600 text-sm py-4">No cards for this filter.</p>
                 )}
               </section>
+            )
+          })}
+        </div>
+      )}
+
+      {pageView === 'packs' && wishlists.length > 0 && (
+        <div className="space-y-4">
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-white font-semibold">Cheapest Printing Packs</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                  Missing cards from all wishlists grouped by their cheapest Scryfall printing.
+                </p>
+              </div>
+              <button
+                onClick={() => navigator.clipboard.writeText(packCopyText(packedCards))}
+                disabled={packingAll || packedCards.length === 0}
+                className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-200 px-3 py-2 rounded-lg text-xs transition"
+              >
+                <ShoppingCart className="w-3.5 h-3.5" />
+                Copy grouped buy list
+              </button>
+            </div>
+          </div>
+
+          {packingAll && (
+            <div className="flex items-center gap-2 text-gray-400 text-sm justify-center py-4">
+              <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+              Building cheapest-printing packs…
+            </div>
+          )}
+
+          {!packingAll && packedCards.length === 0 && (
+            <p className="text-green-400 text-sm font-medium py-8 text-center">
+              No missing cards found across your wishlists.
+            </p>
+          )}
+
+          {packedCards.map((pack) => {
+            const printing = pack.printing
+            const usd = printing ? fmtUsd(printing.prices.usd) : null
+            const eur = printing ? fmtEur(printing.prices.eur) : null
+            const chf = printing ? fmtChf(printing.prices.eur, chfRate) : null
+            const scryfallLink = printing
+              ? `https://scryfall.com/card/${printing.setCode}/${printing.collectorNumber}`
+              : null
+
+            return (
+              <div key={pack.key} className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                      <h3 className="text-white font-medium">{pack.name}</h3>
+                      <span className="text-red-400 text-sm font-semibold">×{pack.quantity}</span>
+                    </div>
+                    <p className="text-gray-400 text-sm">
+                      {printing
+                        ? `${printing.setName} · ${printing.setCode.toUpperCase()} #${printing.collectorNumber} · ${setYear(printing.releasedAt)}`
+                        : 'No printing found'}
+                    </p>
+                    <p className="text-gray-600 text-xs mt-1">
+                      Wishlists: {pack.wishlistNames.join(', ')}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-end gap-1 shrink-0 text-xs">
+                    {usd && <span className="text-green-400">{usd}</span>}
+                    {eur && <span className="text-blue-400">{eur}</span>}
+                    {chf && <span className="text-amber-300">{chf}</span>}
+                    {scryfallLink && (
+                      <a
+                        href={scryfallLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-gray-500 hover:text-white transition mt-1"
+                      >
+                        Scryfall <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
             )
           })}
         </div>
