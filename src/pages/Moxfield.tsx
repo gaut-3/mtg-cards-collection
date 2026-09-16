@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronRight, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
+import { ChevronRight, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
@@ -93,9 +93,81 @@ function currentAppUrl() {
     : window.location.origin
 }
 
+function deckEditForm({
+  editingName,
+  editingUrl,
+  editingDeckText,
+  editSaving,
+  onNameChange,
+  onUrlChange,
+  onDeckTextChange,
+  onSave,
+  onCancel,
+}: {
+  editingName: string
+  editingUrl: string
+  editingDeckText: string
+  editSaving: boolean
+  onNameChange: (value: string) => void
+  onUrlChange: (value: string) => void
+  onDeckTextChange: (value: string) => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div className="border border-violet-600/30 bg-violet-950/10 rounded-xl p-4 mb-4 space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-white text-sm font-medium">Edit Deck Text</h3>
+        <button onClick={onCancel} className="text-gray-500 hover:text-white transition" title="Cancel edit">
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+      <input
+        value={editingName}
+        onChange={(e) => onNameChange(e.target.value)}
+        placeholder="Deck name"
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
+        autoFocus
+      />
+      <input
+        value={editingUrl}
+        onChange={(e) => onUrlChange(e.target.value)}
+        placeholder="Moxfield deck URL (optional)"
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-violet-500 transition"
+      />
+      <textarea
+        value={editingDeckText}
+        onChange={(e) => onDeckTextChange(e.target.value)}
+        placeholder={'1 Commander Name\n1 Sol Ring\n1 Command Tower'}
+        rows={10}
+        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white text-sm font-mono placeholder-gray-600 focus:outline-none focus:border-violet-500 transition resize-none"
+      />
+      <p className="text-gray-500 text-xs">
+        Add, remove, or change quantities in the deck text. Saving rebuilds card images and Scryfall links.
+      </p>
+      <div className="flex gap-2">
+        <button
+          onClick={onSave}
+          disabled={editSaving || !editingName.trim() || !editingDeckText.trim()}
+          className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+        >
+          {editSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+          {editSaving ? 'Saving…' : 'Save deck'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg text-sm transition"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function Moxfield() {
   const { user } = useAuthContext()
-  const { decks, loading, syncing, error, importFromText, updateName } = useMoxfieldDecks(user?.uid ?? null)
+  const { decks, loading, syncing, error, importFromText, updateDeck } = useMoxfieldDecks(user?.uid ?? null)
   const [showImport, setShowImport] = useState(decks.length === 0)
   const [deckName, setDeckName] = useState('')
   const [deckUrl, setDeckUrl] = useState('')
@@ -106,7 +178,9 @@ export default function Moxfield() {
   const [copiedBookmarklet, setCopiedBookmarklet] = useState(false)
   const [editingDeckId, setEditingDeckId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
-  const [renameSaving, setRenameSaving] = useState(false)
+  const [editingUrl, setEditingUrl] = useState('')
+  const [editingDeckText, setEditingDeckText] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
   const [collapsedDecks, setCollapsedDecks] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -145,22 +219,35 @@ export default function Moxfield() {
     window.setTimeout(() => setCopiedBookmarklet(false), 2000)
   }
 
-  const startRename = (deck: MoxfieldDeck) => {
+  const startEdit = (deck: MoxfieldDeck) => {
     setEditingDeckId(deck.id)
     setEditingName(deck.name)
+    setEditingUrl(deck.publicUrl)
+    setEditingDeckText(deck.deckText)
+    setCollapsedDecks((prev) => {
+      const next = new Set(prev)
+      next.delete(deck.id)
+      return next
+    })
   }
 
-  const cancelRename = () => {
+  const cancelEdit = () => {
     setEditingDeckId(null)
     setEditingName('')
+    setEditingUrl('')
+    setEditingDeckText('')
   }
 
-  const saveRename = async () => {
-    if (!editingDeckId || !editingName.trim()) return
-    setRenameSaving(true)
-    const ok = await updateName(editingDeckId, editingName)
-    setRenameSaving(false)
-    if (ok) cancelRename()
+  const saveEdit = async () => {
+    if (!editingDeckId || !editingName.trim() || !editingDeckText.trim()) return
+    setEditSaving(true)
+    const ok = await updateDeck(editingDeckId, {
+      name: editingName,
+      publicUrl: editingUrl,
+      deckText: editingDeckText,
+    })
+    setEditSaving(false)
+    if (ok) cancelEdit()
   }
 
   const toggleCollapsed = (deckId: string) => {
@@ -172,41 +259,13 @@ export default function Moxfield() {
   }
 
   const renderDeckTitle = (deck: MoxfieldDeck, compact = false) => {
-    if (editingDeckId === deck.id) {
-      return (
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <input
-            value={editingName}
-            onChange={(e) => setEditingName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') saveRename()
-              if (e.key === 'Escape') cancelRename()
-            }}
-            className="min-w-0 flex-1 bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-white text-sm focus:outline-none focus:border-violet-500"
-            autoFocus
-          />
-          <button
-            onClick={saveRename}
-            disabled={renameSaving || !editingName.trim()}
-            className="text-green-400 hover:text-green-300 disabled:opacity-50 transition p-1"
-            title="Save name"
-          >
-            {renameSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-          </button>
-          <button onClick={cancelRename} className="text-gray-500 hover:text-white transition p-1" title="Cancel">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )
-    }
-
     return (
       <div className="flex items-center gap-2 min-w-0">
         <h2 className={`text-white font-semibold truncate ${compact ? 'text-sm' : ''}`}>{deck.name}</h2>
         <button
-          onClick={() => startRename(deck)}
+          onClick={() => startEdit(deck)}
           className="text-gray-600 hover:text-violet-400 transition shrink-0"
-          title="Edit deck name"
+          title="Edit deck"
         >
           <Pencil className="w-3.5 h-3.5" />
         </button>
@@ -386,6 +445,17 @@ export default function Moxfield() {
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
               </div>
+              {editingDeckId === deck.id && deckEditForm({
+                editingName,
+                editingUrl,
+                editingDeckText,
+                editSaving,
+                onNameChange: setEditingName,
+                onUrlChange: setEditingUrl,
+                onDeckTextChange: setEditingDeckText,
+                onSave: saveEdit,
+                onCancel: cancelEdit,
+              })}
               {!collapsedDecks.has(deck.id) && <CardImageGrid cards={deck.cards} />}
             </section>
           ))}
@@ -422,6 +492,17 @@ export default function Moxfield() {
                   <ExternalLink className="w-4 h-4" />
                 </a>
               </div>
+              {editingDeckId === deck.id && deckEditForm({
+                editingName,
+                editingUrl,
+                editingDeckText,
+                editSaving,
+                onNameChange: setEditingName,
+                onUrlChange: setEditingUrl,
+                onDeckTextChange: setEditingDeckText,
+                onSave: saveEdit,
+                onCancel: cancelEdit,
+              })}
               {!collapsedDecks.has(deck.id) && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
                 {deck.cards.map((card, i) => (
                   <div key={`${card.name}-${card.board}-${i}`} className="flex items-center gap-2 text-sm rounded-lg bg-gray-950/60 px-3 py-2">

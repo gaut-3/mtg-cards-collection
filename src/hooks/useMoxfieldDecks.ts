@@ -79,6 +79,48 @@ function readCachedDecks(): MoxfieldDeck[] {
   }
 }
 
+async function buildDeckFromText({
+  id,
+  name,
+  deckText,
+  publicUrl,
+}: {
+  id: string
+  name: string
+  deckText: string
+  publicUrl?: string
+}) {
+  const trimmedName = name.trim()
+  const trimmedText = normalizeMoxfieldExport(deckText)
+  if (!trimmedName || !trimmedText) return null
+
+  const lines = parseDeckList(trimmedText)
+  if (lines.length === 0) {
+    throw new Error('Could not parse any card lines. Use Moxfield exported text like "1 Sol Ring".')
+  }
+
+  const scryfallMap = await lookupCardsByName(lines.map((line) => line.name))
+  const cards = lines.map((line, index) => {
+    const scryfallCard = scryfallMap.get(line.name.toLowerCase())
+    return {
+      name: line.name,
+      quantity: line.quantity,
+      board: index === 0 ? 'commander' as const : 'mainboard' as const,
+      scryfallId: scryfallCard?.id,
+      imageUriNormal: scryfallCard?.image_uris?.normal ?? scryfallCard?.card_faces?.[0]?.image_uris?.normal,
+    }
+  })
+
+  return {
+    id,
+    name: trimmedName,
+    publicUrl: publicUrl?.trim() || `https://www.moxfield.com/decks/${id}`,
+    deckText: lines.map((line) => `${line.quantity} ${line.name}`).join('\n'),
+    cards,
+    syncedAt: new Date().toISOString(),
+  } satisfies MoxfieldDeck
+}
+
 export function useMoxfieldDecks(uid: string | null) {
   const [decks, setDecks] = useState<MoxfieldDeck[]>([])
   const [loading, setLoading] = useState(false)
@@ -127,32 +169,14 @@ export function useMoxfieldDecks(uid: string | null) {
     setSyncing(true)
     setError('')
     try {
-      const lines = parseDeckList(trimmedText)
-      if (lines.length === 0) {
-        throw new Error('Could not parse any card lines. Use Moxfield exported text like "1 Sol Ring".')
-      }
-
-      const scryfallMap = await lookupCardsByName(lines.map((line) => line.name))
-      const cards = lines.map((line, index) => {
-        const scryfallCard = scryfallMap.get(line.name.toLowerCase())
-        return {
-          name: line.name,
-          quantity: line.quantity,
-          board: index === 0 ? 'commander' as const : 'mainboard' as const,
-          scryfallId: scryfallCard?.id,
-          imageUriNormal: scryfallCard?.image_uris?.normal ?? scryfallCard?.card_faces?.[0]?.image_uris?.normal,
-        }
-      })
-
       const id = publicUrl?.match(/moxfield\.com\/decks\/([^/?#]+)/i)?.[1] ?? `${Date.now()}`
-      const deck: MoxfieldDeck = {
+      const deck = await buildDeckFromText({
         id,
         name: trimmedName,
-        publicUrl: publicUrl?.trim() || `https://www.moxfield.com/decks/${id}`,
-        deckText: lines.map((line) => `${line.quantity} ${line.name}`).join('\n'),
-        cards,
-        syncedAt: new Date().toISOString(),
-      }
+        deckText: trimmedText,
+        publicUrl,
+      })
+      if (!deck) return null
 
       const batch = writeBatch(db)
       batch.set(doc(db, 'users', uid, 'moxfieldDecks', deck.id), stripUndefined(deck))
@@ -199,5 +223,42 @@ export function useMoxfieldDecks(uid: string | null) {
     }
   }, [load, uid])
 
-  return { decks, loading, syncing, error, load, importFromText, updateName }
+  const updateDeck = useCallback(async (deckId: string, data: {
+    name: string
+    deckText: string
+    publicUrl?: string
+  }) => {
+    if (!uid) return false
+    if (!deckId || !data.name.trim() || !data.deckText.trim()) return false
+
+    setSyncing(true)
+    setError('')
+    try {
+      const deck = await buildDeckFromText({
+        id: deckId,
+        name: data.name,
+        deckText: data.deckText,
+        publicUrl: data.publicUrl,
+      })
+      if (!deck) return false
+
+      await setDoc(doc(db, 'users', uid, 'moxfieldDecks', deckId), stripUndefined(deck))
+      setDecks((prev) => {
+        const next = prev
+          .map((existing) => existing.id === deckId ? deck : existing)
+          .sort((a, b) => a.name.localeCompare(b.name))
+        saveCachedDecks(next)
+        return next
+      })
+      return true
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to update Moxfield deck.')
+      await load()
+      return false
+    } finally {
+      setSyncing(false)
+    }
+  }, [load, uid])
+
+  return { decks, loading, syncing, error, load, importFromText, updateName, updateDeck }
 }
