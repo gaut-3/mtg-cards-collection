@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, SlidersHorizontal, Upload, X } from 'lucide-react'
+import { RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useCollection } from '../hooks/useCollection'
 import type { EnrichedCard } from '../types/scryfall'
@@ -97,7 +97,7 @@ function sortGroups(groups: string[], groupBy: GroupKey): string[] {
 
 export default function Collection() {
   const { user } = useAuthContext()
-  const { cards, loading } = useCollection(user?.uid ?? null)
+  const { cards, loading, loadCollection } = useCollection(user?.uid ?? null)
 
   const [search, setSearch] = useState('')
   const [filterColor, setFilterColor] = useState('')
@@ -255,13 +255,23 @@ export default function Collection() {
             {filtered.length} cards · ${totalUsd.toFixed(2)} total
           </p>
         </div>
-        <Link
-          to="/upload"
-          className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition"
-        >
-          <Upload className="w-4 h-4" />
-          Re-import
-        </Link>
+        <div className="flex gap-2">
+          <button
+            onClick={() => loadCollection(true)}
+            disabled={loading}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 px-3 py-2 rounded-lg text-sm transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <Link
+            to="/upload"
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition"
+          >
+            <Upload className="w-4 h-4" />
+            Re-import
+          </Link>
+        </div>
       </div>
 
       {/* Search + filter bar */}

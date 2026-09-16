@@ -24,6 +24,19 @@ const SKIP_SECTION_HEADERS = new Set([
 ])
 
 const MOXFIELD_DECKS_KEY = 'mtg-hub-moxfield-decks'
+const MOXFIELD_DECKS_META_KEY = 'mtg-hub-moxfield-decks-meta'
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
+function cacheIsFresh() {
+  try {
+    const raw = localStorage.getItem(MOXFIELD_DECKS_META_KEY)
+    if (!raw) return false
+    const data = JSON.parse(raw) as { savedAt?: number }
+    return typeof data.savedAt === 'number' && Date.now() - data.savedAt < CACHE_TTL_MS
+  } catch {
+    return false
+  }
+}
 
 function stripUndefined<T extends object>(obj: T): T {
   return Object.fromEntries(
@@ -67,6 +80,7 @@ function normalizeMoxfieldExport(text: string) {
 
 function saveCachedDecks(decks: MoxfieldDeck[]) {
   localStorage.setItem(MOXFIELD_DECKS_KEY, JSON.stringify(decks))
+  localStorage.setItem(MOXFIELD_DECKS_META_KEY, JSON.stringify({ savedAt: Date.now(), count: decks.length }))
 }
 
 function readCachedDecks(): MoxfieldDeck[] {
@@ -127,11 +141,13 @@ export function useMoxfieldDecks(uid: string | null) {
   const [syncing, setSyncing] = useState(false)
   const [error, setError] = useState('')
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     const cached = readCachedDecks()
     if (cached.length > 0) setDecks(cached)
 
     if (!uid) return
+    if (!force && cached.length > 0 && cacheIsFresh()) return
+
     setLoading(true)
     setError('')
     try {
@@ -260,5 +276,5 @@ export function useMoxfieldDecks(uid: string | null) {
     }
   }, [load, uid])
 
-  return { decks, loading, syncing, error, load, importFromText, updateName, updateDeck }
+  return { decks, loading, syncing, error, load, importFromText, updateName, updateDeck, refresh: () => load(true) }
 }

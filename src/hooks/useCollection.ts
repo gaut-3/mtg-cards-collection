@@ -14,6 +14,35 @@ import type { EnrichedCard } from '../types/scryfall'
 import type { PriceSnapshot } from '../types/deck'
 
 const LOCALSTORAGE_KEY = 'mtg-hub-collection'
+const COLLECTION_CACHE_META_KEY = 'mtg-hub-collection-meta'
+const WISHLISTS_CACHE_KEY = 'mtg-hub-wishlists'
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+
+function cacheIsFresh(key: string) {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return false
+    const data = JSON.parse(raw) as { savedAt?: number }
+    return typeof data.savedAt === 'number' && Date.now() - data.savedAt < CACHE_TTL_MS
+  } catch {
+    return false
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value }))
+}
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return 'value' in parsed ? parsed.value as T : parsed as T
+  } catch {
+    return null
+  }
+}
 
 // Firestore rejects undefined values — strip them recursively before writing
 function stripUndefined<T extends object>(obj: T): T {
@@ -31,22 +60,24 @@ export function useCollection(uid: string | null) {
   const [loading, setLoading] = useState(false)
 
   // Load from Firestore (or localStorage fallback)
-  const loadCollection = useCallback(async () => {
+  const loadCollection = useCallback(async (force = false) => {
+    const cached = readCache<EnrichedCard[]>(LOCALSTORAGE_KEY)
+    if (cached) setCards(cached)
+
     if (!uid) {
-      const cached = localStorage.getItem(LOCALSTORAGE_KEY)
-      if (cached) setCards(JSON.parse(cached))
       return
     }
+    if (!force && cached && cacheIsFresh(COLLECTION_CACHE_META_KEY)) return
+
     setLoading(true)
     try {
       const snap = await getDocs(collection(db, 'users', uid, 'cards'))
       const loaded = snap.docs.map((d) => d.data() as EnrichedCard)
       setCards(loaded)
-      localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(loaded))
+      writeCache(LOCALSTORAGE_KEY, loaded)
+      writeCache(COLLECTION_CACHE_META_KEY, { count: loaded.length })
     } catch (e) {
       console.error('Failed to load collection', e)
-      const cached = localStorage.getItem(LOCALSTORAGE_KEY)
-      if (cached) setCards(JSON.parse(cached))
     } finally {
       setLoading(false)
     }
@@ -60,7 +91,8 @@ export function useCollection(uid: string | null) {
   const saveCollection = useCallback(
     async (enriched: EnrichedCard[]) => {
       setCards(enriched)
-      localStorage.setItem(LOCALSTORAGE_KEY, JSON.stringify(enriched))
+      writeCache(LOCALSTORAGE_KEY, enriched)
+      writeCache(COLLECTION_CACHE_META_KEY, { count: enriched.length })
 
       if (!uid) return
 
@@ -106,6 +138,7 @@ export function useCollection(uid: string | null) {
   const clearCollection = useCallback(async () => {
     setCards([])
     localStorage.removeItem(LOCALSTORAGE_KEY)
+    localStorage.removeItem(COLLECTION_CACHE_META_KEY)
     if (!uid) return
     const snap = await getDocs(collection(db, 'users', uid, 'cards'))
     const batch = writeBatch(db)
@@ -140,12 +173,16 @@ export function useWishlists(uid: string | null) {
     Array<{ id: string; name: string; deckText: string; createdAt: string }>
   >([])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    const cached = readCache<Array<{ id: string; name: string; deckText: string; createdAt: string }>>(WISHLISTS_CACHE_KEY)
+    if (cached) setWishlists(cached)
     if (!uid) return
+    if (!force && cached && cacheIsFresh(WISHLISTS_CACHE_KEY)) return
+
     const snap = await getDocs(collection(db, 'users', uid, 'wishlists'))
-    setWishlists(
-      snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
-    )
+    const loaded = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }))
+    setWishlists(loaded)
+    writeCache(WISHLISTS_CACHE_KEY, loaded)
   }, [uid])
 
   useEffect(() => { load() }, [load])
@@ -156,9 +193,13 @@ export function useWishlists(uid: string | null) {
       const id = Date.now().toString()
       const data = { name, deckText, createdAt: new Date().toISOString() }
       await setDoc(doc(db, 'users', uid, 'wishlists', id), data)
-      await load()
+      setWishlists((prev) => {
+        const next = [...prev, { id, ...data }]
+        writeCache(WISHLISTS_CACHE_KEY, next)
+        return next
+      })
     },
-    [uid, load]
+    [uid]
   )
 
   const update = useCallback(
@@ -169,19 +210,27 @@ export function useWishlists(uid: string | null) {
         { name, deckText },
         { merge: true }
       )
-      await load()
+      setWishlists((prev) => {
+        const next = prev.map((wishlist) => wishlist.id === id ? { ...wishlist, name, deckText } : wishlist)
+        writeCache(WISHLISTS_CACHE_KEY, next)
+        return next
+      })
     },
-    [uid, load]
+    [uid]
   )
 
   const remove = useCallback(
     async (id: string) => {
       if (!uid) return
       await deleteDoc(doc(db, 'users', uid, 'wishlists', id))
-      await load()
+      setWishlists((prev) => {
+        const next = prev.filter((wishlist) => wishlist.id !== id)
+        writeCache(WISHLISTS_CACHE_KEY, next)
+        return next
+      })
     },
-    [uid, load]
+    [uid]
   )
 
-  return { wishlists, save, update, remove }
+  return { wishlists, save, update, remove, refresh: () => load(true) }
 }

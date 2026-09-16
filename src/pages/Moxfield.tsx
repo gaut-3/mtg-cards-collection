@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, Search, X } from 'lucide-react'
+import { ChevronRight, Copy, ExternalLink, Image, Layers, Loader2, Pencil, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { MoxfieldDeck, MoxfieldDeckCard } from '../types/moxfield'
@@ -167,7 +167,7 @@ function deckEditForm({
 
 export default function Moxfield() {
   const { user } = useAuthContext()
-  const { decks, loading, syncing, error, importFromText, updateDeck } = useMoxfieldDecks(user?.uid ?? null)
+  const { decks, loading, syncing, error, importFromText, updateDeck, refresh } = useMoxfieldDecks(user?.uid ?? null)
   const [showImport, setShowImport] = useState(decks.length === 0)
   const [deckName, setDeckName] = useState('')
   const [deckUrl, setDeckUrl] = useState('')
@@ -286,13 +286,23 @@ export default function Moxfield() {
           </div>
         </div>
 
-        <button
-          onClick={() => setShowImport((v) => !v)}
-          className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
-        >
-          <Plus className="w-4 h-4" />
-          Import Deck
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={refresh}
+            disabled={loading}
+            className="flex items-center justify-center gap-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 text-gray-300 px-3 py-2 rounded-lg text-sm transition"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+          <button
+            onClick={() => setShowImport((v) => !v)}
+            className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-500 text-white px-4 py-2 rounded-lg text-sm font-medium transition"
+          >
+            <Plus className="w-4 h-4" />
+            Import Deck
+          </button>
+        </div>
       </div>
 
       {showImport && (

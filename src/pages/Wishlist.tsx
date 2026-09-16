@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   BookMarked, Plus, Trash2, ChevronDown, ChevronUp,
-  ExternalLink, ShoppingCart, Check, ChevronRight, Loader2, Pencil,
+  ExternalLink, ShoppingCart, Check, ChevronRight, Loader2, Pencil, RefreshCw,
 } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useCollection, useWishlists } from '../hooks/useCollection'
@@ -476,7 +476,7 @@ function packCopyText(packs: PackedWishlistCard[]) {
 export default function Wishlist() {
   const { user } = useAuthContext()
   const { cards } = useCollection(user?.uid ?? null)
-  const { wishlists, save, update, remove } = useWishlists(user?.uid ?? null)
+  const { wishlists, save, update, remove, refresh } = useWishlists(user?.uid ?? null)
 
   const [showNew, setShowNew] = useState(false)
   const [name, setName] = useState('')
@@ -717,6 +717,13 @@ export default function Wishlist() {
         >
           <Plus className="w-4 h-4" />
           New
+        </button>
+        <button
+          onClick={refresh}
+          className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded-lg text-sm transition"
+        >
+          <RefreshCw className="w-4 h-4" />
+          Refresh
         </button>
       </div>
 
