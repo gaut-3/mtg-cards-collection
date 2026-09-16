@@ -4,30 +4,109 @@ import type { ScryfallPrinting } from '../types/deck'
 
 const BASE = 'https://api.scryfall.com'
 const BATCH_SIZE = 75
-const DELAY_MS = 120 // stay well under 10 req/s
+const DELAY_MS = 180 // stay well under Scryfall rate limits
+const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms))
+
+type CacheEntry<T> = {
+  savedAt: number
+  value: T
+}
+
+const inFlightCardBatches = new Map<string, Promise<ScryfallCard[]>>()
+const inFlightNameBatches = new Map<string, Promise<Map<string, ScryfallCard>>>()
+const inFlightPrintings = new Map<string, Promise<ScryfallPrinting[]>>()
+
+function cacheKey(prefix: string, key: string) {
+  return `${prefix}:${key.trim().toLowerCase()}`
+}
+
+function readCache<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const entry = JSON.parse(raw) as CacheEntry<T>
+    if (!entry.savedAt || Date.now() - entry.savedAt > CACHE_TTL_MS) {
+      localStorage.removeItem(key)
+      return null
+    }
+    return entry.value
+  } catch {
+    return null
+  }
+}
+
+function writeCache<T>(key: string, value: T) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ savedAt: Date.now(), value } satisfies CacheEntry<T>))
+  } catch {
+    // Ignore quota/security errors; network fetching still works.
+  }
+}
+
+function cardIdKey(id: string) {
+  return cacheKey('mtg-scryfall-card-id', id)
+}
+
+function cardNameKey(name: string) {
+  return cacheKey('mtg-scryfall-card-name', name)
+}
+
+function printingsKey(name: string) {
+  return cacheKey('mtg-scryfall-printings', name)
+}
+
+function cacheCard(card: ScryfallCard, requestedName?: string) {
+  writeCache(cardIdKey(card.id), card)
+  writeCache(cardNameKey(card.name), card)
+  if (requestedName) writeCache(cardNameKey(requestedName), card)
+}
 
 // ---------------------------------------------------------------------------
 // Batch card fetch by Scryfall IDs
 // ---------------------------------------------------------------------------
 async function fetchCardsBatch(ids: string[]): Promise<ScryfallCard[]> {
-  const identifiers = ids.map((id) => ({ id }))
-  const response = await fetch(`${BASE}/cards/collection`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      'User-Agent': 'MTGHub/1.0',
-    },
-    body: JSON.stringify({ identifiers }),
+  const result: ScryfallCard[] = []
+  const missing = ids.filter((id) => {
+    const cached = readCache<ScryfallCard>(cardIdKey(id))
+    if (cached) result.push(cached)
+    return !cached
   })
-  if (!response.ok) {
-    console.error('Scryfall batch fetch failed', response.status)
-    return []
+
+  if (missing.length === 0) return result
+
+  const inFlightKey = missing.slice().sort().join('|')
+  const existing = inFlightCardBatches.get(inFlightKey)
+  if (existing) return [...result, ...await existing]
+
+  const request = (async () => {
+    const identifiers = missing.map((id) => ({ id }))
+    const response = await fetch(`${BASE}/cards/collection`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent': 'MTGHub/1.0',
+      },
+      body: JSON.stringify({ identifiers }),
+    })
+    if (!response.ok) {
+      console.error('Scryfall batch fetch failed', response.status)
+      return []
+    }
+    const data = await response.json()
+    const cards = (data.data ?? []) as ScryfallCard[]
+    cards.forEach((card) => cacheCard(card))
+    return cards
+  })()
+
+  inFlightCardBatches.set(inFlightKey, request)
+  try {
+    return [...result, ...await request]
+  } finally {
+    inFlightCardBatches.delete(inFlightKey)
   }
-  const data = await response.json()
-  return (data.data ?? []) as ScryfallCard[]
 }
 
 // ---------------------------------------------------------------------------
@@ -115,13 +194,30 @@ export async function lookupCardsByName(
   names: string[]
 ): Promise<Map<string, ScryfallCard>> {
   const result = new Map<string, ScryfallCard>()
-  const unique = [...new Set(names)]
+  const unique = [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+  const missing = unique.filter((name) => {
+    const cached = readCache<ScryfallCard>(cardNameKey(name))
+    if (cached) result.set(name.toLowerCase(), cached)
+    return !cached
+  })
+  if (missing.length === 0) return result
+
   const batches: string[][] = []
-  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    batches.push(unique.slice(i, i + BATCH_SIZE))
+  for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+    batches.push(missing.slice(i, i + BATCH_SIZE))
   }
 
   for (const batch of batches) {
+    const inFlightKey = batch.slice().sort((a, b) => a.localeCompare(b)).join('|').toLowerCase()
+    const existing = inFlightNameBatches.get(inFlightKey)
+    if (existing) {
+      const cards = await existing
+      cards.forEach((card, key) => result.set(key, card))
+      continue
+    }
+
+    const request = (async () => {
+      const batchResult = new Map<string, ScryfallCard>()
     const identifiers = batch.map((name) => ({ name }))
     const response = await fetch(`${BASE}/cards/collection`, {
       method: 'POST',
@@ -132,12 +228,29 @@ export async function lookupCardsByName(
       },
       body: JSON.stringify({ identifiers }),
     })
-    if (!response.ok) continue
+    if (!response.ok) return batchResult
     const data = await response.json()
     for (const card of (data.data ?? []) as ScryfallCard[]) {
-      result.set(card.name.toLowerCase(), card)
+        cacheCard(card)
+        batchResult.set(card.name.toLowerCase(), card)
+        const requested = batch.find((name) => name.toLowerCase() === card.name.toLowerCase())
+        if (requested) {
+          cacheCard(card, requested)
+          batchResult.set(requested.toLowerCase(), card)
+        }
     }
-    await sleep(DELAY_MS)
+      return batchResult
+    })()
+
+    inFlightNameBatches.set(inFlightKey, request)
+    try {
+      const cards = await request
+      cards.forEach((card, key) => result.set(key, card))
+    } finally {
+      inFlightNameBatches.delete(inFlightKey)
+    }
+
+    if (batches.indexOf(batch) < batches.length - 1) await sleep(DELAY_MS)
   }
   return result
 }
@@ -148,6 +261,25 @@ export async function lookupCardsByName(
 export async function fetchAllPrintings(
   cardName: string
 ): Promise<ScryfallPrinting[]> {
+  const cached = readCache<ScryfallPrinting[]>(printingsKey(cardName))
+  if (cached) return cached
+
+  const key = cardName.trim().toLowerCase()
+  const existing = inFlightPrintings.get(key)
+  if (existing) return existing
+
+  const request = fetchAllPrintingsUncached(cardName)
+  inFlightPrintings.set(key, request)
+  try {
+    const printings = await request
+    writeCache(printingsKey(cardName), printings)
+    return printings
+  } finally {
+    inFlightPrintings.delete(key)
+  }
+}
+
+async function fetchAllPrintingsUncached(cardName: string): Promise<ScryfallPrinting[]> {
   const printings: ScryfallPrinting[] = []
   // Encode the exact name query: !"Card Name"
   const q = encodeURIComponent(`!"${cardName}"`)

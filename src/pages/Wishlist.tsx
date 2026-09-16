@@ -621,6 +621,7 @@ export default function Wishlist() {
       setPackingAll(true)
       try {
         const grouped = new Map<string, PackedWishlistCard>()
+        const enrichedByName = new Map<string, Promise<DeckDiffMissingEntry>>()
 
         for (const wl of wishlists) {
           const diff = diffs[wl.id] ?? await buildDeckDiff(parseDeckList(wl.deckText), cards)
@@ -631,9 +632,12 @@ export default function Wishlist() {
           }
 
           for (const missing of diff.missing) {
-            const enriched = missing.allPrintings === undefined
-              ? await enrichMissingCard(missing)
-              : missing
+            const nameKey = missing.name.toLowerCase()
+            const enrichedPromise = missing.allPrintings === undefined
+              ? enrichedByName.get(nameKey) ?? enrichMissingCard(missing)
+              : Promise.resolve(missing)
+            if (!enrichedByName.has(nameKey)) enrichedByName.set(nameKey, enrichedPromise)
+            const enriched = await enrichedPromise
             if (cancelled) return
 
             const printing = enriched.allPrintings?.[0]
