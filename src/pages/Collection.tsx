@@ -3,7 +3,9 @@ import { Link } from 'react-router-dom'
 import { RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useCollection } from '../hooks/useCollection'
+import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
 import type { EnrichedCard } from '../types/scryfall'
+import type { MoxfieldDeckCard } from '../types/moxfield'
 
 const RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4, bonus: 5 }
 const COLOR_MAP: Record<string, string> = {
@@ -98,6 +100,7 @@ function sortGroups(groups: string[], groupBy: GroupKey): string[] {
 export default function Collection() {
   const { user } = useAuthContext()
   const { cards, loading, loadCollection } = useCollection(user?.uid ?? null)
+  const { decks } = useMoxfieldDecks(user?.uid ?? null)
 
   const [search, setSearch] = useState('')
   const [filterColor, setFilterColor] = useState('')
@@ -223,7 +226,7 @@ export default function Collection() {
     )
   }
 
-  if (cards.length === 0) {
+  if (cards.length === 0 && decks.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-64 gap-4">
         <p className="text-gray-400">No cards yet. Import your ManaBox collection to get started.</p>
@@ -510,7 +513,47 @@ export default function Collection() {
       ))}
 
       {filtered.length === 0 && (
-        <div className="text-center py-16 text-gray-500">No cards match your filters.</div>
+        <div className="text-center py-8 text-gray-500">No owned cards match your filters.</div>
+      )}
+
+      {decks.length > 0 && (
+        <section className="mt-10 border-t border-gray-800 pt-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div>
+              <h2 className="text-white text-lg font-semibold">Cards in your Moxfield decks</h2>
+              <p className="text-gray-500 text-sm">Shown separately from your collection, even when you own the same card.</p>
+            </div>
+            <div className="flex-1" />
+            <span className="inline-flex items-center gap-1.5 text-xs text-amber-300">
+              <span className="w-3 h-3 rounded border-2 border-amber-400" /> Deck card
+            </span>
+          </div>
+          <div className="space-y-8">
+            {decks.map((deck) => {
+              const query = search.trim().toLowerCase()
+              const deckMatches = !query || deck.name.toLowerCase().includes(query)
+              const deckCards = deck.cards.filter((card) =>
+                deckMatches || card.name.toLowerCase().includes(query)
+              )
+              if (deckCards.length === 0) return null
+
+              return (
+                <div key={deck.id}>
+                  <div className="flex items-center gap-3 mb-3">
+                    <h3 className="text-amber-200 font-medium text-sm">{deck.name}</h3>
+                    <div className="flex-1 h-px bg-gray-800" />
+                    <span className="text-gray-600 text-xs">{deckCards.length} cards</span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                    {deckCards.map((card, index) => (
+                      <DeckCardTile key={`${deck.id}-${card.scryfallId ?? card.name}-${index}`} card={card} />
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
       )}
 
       {/* Card detail modal */}
@@ -550,6 +593,37 @@ function CardTile({ card, onClick }: { card: EnrichedCard; onClick: () => void }
         <div className="flex items-center justify-between mt-0.5">
           <span className="text-gray-400 text-xs">×{card.quantity}</span>
           <span className="text-green-400 text-xs">${price.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DeckCardTile({ card }: { card: MoxfieldDeckCard }) {
+  return (
+    <div className="group rounded-xl overflow-hidden bg-gray-900 border-2 border-amber-500/70 shadow shadow-amber-950/30">
+      {card.scryfallId && card.imageUriNormal ? (
+        <a href={`https://scryfall.com/card/${card.scryfallId}`} target="_blank" rel="noopener noreferrer">
+          <img
+            src={card.imageUriNormal}
+            alt={card.name}
+            loading="lazy"
+            className="w-full object-cover aspect-[5/7] group-hover:scale-105 transition duration-300"
+          />
+        </a>
+      ) : (
+        <div className="w-full aspect-[5/7] bg-gray-800 flex items-center justify-center text-gray-500 text-xs p-2 text-center">
+          {card.name}
+        </div>
+      )}
+      <div className="px-2 py-1.5">
+        <span className="inline-flex rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
+          Deck card
+        </span>
+        <p className="mt-1 text-white text-xs font-semibold truncate" title={card.name}>{card.name}</p>
+        <div className="flex items-center justify-between mt-0.5">
+          {card.board === 'commander' && <span className="text-violet-300 text-[10px]">Commander</span>}
+          <span className="ml-auto text-gray-400 text-xs">×{card.quantity}</span>
         </div>
       </div>
     </div>
