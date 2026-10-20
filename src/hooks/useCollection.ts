@@ -10,11 +10,10 @@ import {
   orderBy,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { clearCollectionCache, readCollectionCache, removeLegacyCollectionCache, writeCollectionCache } from '../lib/collectionCache'
 import type { EnrichedCard } from '../types/scryfall'
 import type { PriceSnapshot } from '../types/deck'
 
-const LOCALSTORAGE_KEY = 'mtg-hub-collection'
-const COLLECTION_CACHE_META_KEY = 'mtg-hub-collection-meta'
 const WISHLISTS_CACHE_KEY = 'mtg-hub-wishlists'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -61,21 +60,31 @@ export function useCollection(uid: string | null) {
 
   // Load from Firestore (or localStorage fallback)
   const loadCollection = useCallback(async (force = false) => {
-    const cached = readCache<EnrichedCard[]>(LOCALSTORAGE_KEY)
-    if (cached) setCards(cached)
-
     if (!uid) {
       return
     }
-    if (!force && cached && cacheIsFresh(COLLECTION_CACHE_META_KEY)) return
+
+    removeLegacyCollectionCache()
+    let cached = null
+    try {
+      cached = await readCollectionCache(uid)
+      if (cached) setCards(cached.cards)
+    } catch (e) {
+      console.warn('Could not read local collection cache; falling back to Firestore.', e)
+    }
+
+    if (!force && cached && Date.now() - cached.savedAt < CACHE_TTL_MS) return
 
     setLoading(true)
     try {
       const snap = await getDocs(collection(db, 'users', uid, 'cards'))
       const loaded = snap.docs.map((d) => d.data() as EnrichedCard)
       setCards(loaded)
-      writeCache(LOCALSTORAGE_KEY, loaded)
-      writeCache(COLLECTION_CACHE_META_KEY, { count: loaded.length })
+      try {
+        await writeCollectionCache(uid, loaded)
+      } catch (cacheError) {
+        console.warn('Could not update local collection cache.', cacheError)
+      }
     } catch (e) {
       console.error('Failed to load collection', e)
     } finally {
@@ -91,8 +100,6 @@ export function useCollection(uid: string | null) {
   const saveCollection = useCallback(
     async (enriched: EnrichedCard[]) => {
       setCards(enriched)
-      writeCache(LOCALSTORAGE_KEY, enriched)
-      writeCache(COLLECTION_CACHE_META_KEY, { count: enriched.length })
 
       if (!uid) return
 
@@ -131,19 +138,29 @@ export function useCollection(uid: string | null) {
         doc(db, 'users', uid, 'snapshots', todayStr()),
         snapshot
       )
+
+      try {
+        await writeCollectionCache(uid, enriched)
+      } catch (cacheError) {
+        console.warn('Collection saved to Firestore, but local cache could not be updated.', cacheError)
+      }
     },
     [uid]
   )
 
   const clearCollection = useCallback(async () => {
     setCards([])
-    localStorage.removeItem(LOCALSTORAGE_KEY)
-    localStorage.removeItem(COLLECTION_CACHE_META_KEY)
+    removeLegacyCollectionCache()
     if (!uid) return
     const snap = await getDocs(collection(db, 'users', uid, 'cards'))
     const batch = writeBatch(db)
     snap.docs.forEach((d) => batch.delete(d.ref))
     await batch.commit()
+    try {
+      await clearCollectionCache(uid)
+    } catch (cacheError) {
+      console.warn('Collection cleared from Firestore, but local cache could not be cleared.', cacheError)
+    }
   }, [uid])
 
   return { cards, loading, loadCollection, saveCollection, clearCollection }
