@@ -229,19 +229,6 @@ export default function Collection() {
       filterCmcMin, filterCmcMax, filterFoil, filterFormat, filterBinder,
       sortKey, sortDir])
 
-  // Build grouped structure
-  const grouped = useMemo((): Array<{ label: string; cards: EnrichedCard[] }> => {
-    if (groupBy === 'none') return [{ label: '', cards: filtered }]
-    const map = new Map<string, EnrichedCard[]>()
-    for (const card of filtered) {
-      const key = getCardGroup(card, groupBy)
-      if (!map.has(key)) map.set(key, [])
-      map.get(key)!.push(card)
-    }
-    const sortedKeys = sortGroups([...map.keys()], groupBy)
-    return sortedKeys.map((label) => ({ label, cards: map.get(label)! }))
-  }, [filtered, groupBy])
-
   const filteredDecks = useMemo(() => decks.map((deck) => {
     const query = search.trim().toLowerCase()
     const deckNameMatches = !query || deck.name.toLowerCase().includes(query)
@@ -300,7 +287,67 @@ export default function Collection() {
     filterBinder, sortKey, sortDir, groupBy,
   ])
 
+  const combinedGroups = useMemo(() => {
+    type GridEntry =
+      | { key: string; source: 'collection'; card: EnrichedCard }
+      | { key: string; source: 'deck'; card: MoxfieldDeckCard; metadata?: ScryfallCard; deckName: string }
+
+    const entries: GridEntry[] = [
+      ...filtered.map((card) => ({
+        key: `collection:${card.scryfallId}`,
+        source: 'collection' as const,
+        card,
+      })),
+      ...filteredDecks.flatMap((deck) => deck.cards.map(({ card, index, metadata }) => ({
+        key: `deck:${deck.id}:${card.scryfallId ?? card.name}:${index}`,
+        source: 'deck' as const,
+        card,
+        metadata,
+        deckName: deck.name,
+      }))),
+    ]
+
+    const groupByEntry = (entry: GridEntry) => entry.source === 'collection'
+      ? getCardGroup(entry.card, groupBy)
+      : deckCardGroup(entry.metadata, entry.deckName, groupBy)
+    const groups = new Map<string, GridEntry[]>()
+    for (const entry of entries) {
+      const label = groupByEntry(entry)
+      if (!groups.has(label)) groups.set(label, [])
+      groups.get(label)!.push(entry)
+    }
+
+    const labels = groupBy === 'none' ? [''] : sortGroups([...groups.keys()], groupBy)
+    return labels.map((label) => ({
+      label,
+      cards: (groups.get(label) ?? []).sort((a, b) => {
+        const cardName = (entry: GridEntry) => entry.card.name
+        const price = (entry: GridEntry) => entry.source === 'collection'
+          ? cardPrice(entry.card)
+          : parseFloat(entry.metadata?.prices.usd ?? '0')
+        const rarity = (entry: GridEntry) => entry.source === 'collection'
+          ? entry.card.rarity
+          : entry.metadata?.rarity ?? 'common'
+        const cmc = (entry: GridEntry) => entry.source === 'collection'
+          ? entry.card.cmc
+          : entry.metadata?.cmc ?? 0
+        const quantity = (entry: GridEntry) => entry.card.quantity
+
+        let cmp = 0
+        if (sortKey === 'name') cmp = cardName(a).localeCompare(cardName(b))
+        else if (sortKey === 'price') cmp = price(a) - price(b)
+        else if (sortKey === 'rarity') cmp = (RARITY_ORDER[rarity(a)] ?? 0) - (RARITY_ORDER[rarity(b)] ?? 0)
+        else if (sortKey === 'cmc') cmp = cmc(a) - cmc(b)
+        else if (sortKey === 'quantity') cmp = quantity(a) - quantity(b)
+        if (cmp === 0 && a.source !== b.source) cmp = a.source === 'collection' ? -1 : 1
+        return sortDir === 'asc' ? cmp : -cmp
+      }),
+    }))
+  }, [filtered, filteredDecks, groupBy, sortKey, sortDir])
+
   const totalUsd = filtered.reduce((s, c) => s + cardPrice(c) * c.quantity, 0)
+  const deckCardCount = filteredDecks.reduce((sum, deck) => sum + deck.cards.length, 0)
+  const displayedCardCount = filtered.length + deckCardCount
 
   const activeFilterCount = [
     filterColor, filterRarity, filterType, filterFoil, filterFormat, filterBinder,
@@ -358,7 +405,7 @@ export default function Collection() {
         <div>
           <h1 className="text-2xl font-bold text-white">Collection</h1>
           <p className="text-gray-500 text-sm">
-            {filtered.length} cards · ${totalUsd.toFixed(2)} total
+            {filtered.length} owned · {deckCardCount} deck cards · ${totalUsd.toFixed(2)} owned value
           </p>
         </div>
         <div className="flex gap-2">
@@ -596,8 +643,14 @@ export default function Collection() {
         </div>
       )}
 
-      {/* Card grid — flat or grouped */}
-      {grouped.map(({ label, cards: groupCards }) => (
+      <div className="flex justify-end mb-3">
+        <span className="inline-flex items-center gap-1.5 text-xs text-amber-300">
+          <span className="w-3 h-3 rounded border-2 border-amber-400" /> Deck card
+        </span>
+      </div>
+
+      {/* Owned and deck cards share the same searchable, filterable grid. */}
+      {combinedGroups.map(({ label, cards: groupCards }) => (
         <div key={label || '__all'} className="mb-6">
           {/* Group header */}
           {groupBy !== 'none' && (
@@ -608,66 +661,19 @@ export default function Collection() {
             </div>
           )}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {groupCards.map((card) => (
-              <CardTile key={card.scryfallId} card={card} onClick={() => setSelectedCard(card)} />
+            {groupCards.map((entry) => (
+              entry.source === 'collection' ? (
+                <CardTile key={entry.key} card={entry.card} onClick={() => setSelectedCard(entry.card)} />
+              ) : (
+                <DeckCardTile key={entry.key} card={entry.card} metadata={entry.metadata} />
+              )
             ))}
           </div>
         </div>
       ))}
 
-      {filtered.length === 0 && (
-        <div className="text-center py-8 text-gray-500">No owned cards match your filters.</div>
-      )}
-
-      {decks.length > 0 && (
-        <section className="mt-10 border-t border-gray-800 pt-6">
-          <div className="flex items-center gap-3 mb-5">
-            <div>
-              <h2 className="text-white text-lg font-semibold">Cards in your Moxfield decks</h2>
-              <p className="text-gray-500 text-sm">Shown separately from your collection, even when you own the same card.</p>
-            </div>
-            <div className="flex-1" />
-            <span className="inline-flex items-center gap-1.5 text-xs text-amber-300">
-              <span className="w-3 h-3 rounded border-2 border-amber-400" /> Deck card
-            </span>
-          </div>
-          <div className="space-y-8">
-            {filteredDecks.map((deck) => {
-              if (deck.cards.length === 0) return null
-              return (
-                <div key={deck.id}>
-                  <div className="flex items-center gap-3 mb-3">
-                    <h3 className="text-amber-200 font-medium text-sm">{deck.name}</h3>
-                    <div className="flex-1 h-px bg-gray-800" />
-                    <span className="text-gray-600 text-xs">{deck.cards.length} cards</span>
-                  </div>
-                  <div className="space-y-5">
-                    {deck.groupedCards.map((group) => (
-                      <div key={`${deck.id}-${group.label}`}>
-                        {groupBy !== 'none' && (
-                          <div className="flex items-center gap-3 mb-3">
-                            <span className="text-gray-300 font-medium text-xs">{group.label}</span>
-                            <div className="flex-1 h-px bg-gray-800" />
-                            <span className="text-gray-600 text-xs">{group.cards.length} cards</span>
-                          </div>
-                        )}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                          {group.cards.map(({ card, index, metadata }) => (
-                            <DeckCardTile
-                              key={`${deck.id}-${card.scryfallId ?? card.name}-${index}`}
-                              card={card}
-                              metadata={metadata}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </section>
+      {displayedCardCount === 0 && (
+        <div className="text-center py-16 text-gray-500">No cards match your filters.</div>
       )}
 
       {/* Card detail modal */}
