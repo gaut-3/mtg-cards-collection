@@ -231,7 +231,6 @@ export default function Collection() {
 
   const filteredDecks = useMemo(() => decks.map((deck) => {
     const query = search.trim().toLowerCase()
-    const deckNameMatches = !query || deck.name.toLowerCase().includes(query)
     const deckCards = deck.cards
       .map((card, index) => ({
         card,
@@ -239,7 +238,7 @@ export default function Collection() {
         metadata: deckCardMetadata.get(card.name.toLowerCase()),
       }))
       .filter(({ card, metadata }) => {
-        const searchMatches = deckNameMatches || [
+        const searchMatches = [
           card.name,
           metadata?.type_line ?? '',
           metadata?.oracle_text ?? metadata?.card_faces?.[0]?.oracle_text ?? '',
