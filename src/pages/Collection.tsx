@@ -664,7 +664,12 @@ export default function Collection() {
               entry.source === 'collection' ? (
                 <CardTile key={entry.key} card={entry.card} onClick={() => setSelectedCard(entry.card)} />
               ) : (
-                <DeckCardTile key={entry.key} card={entry.card} metadata={entry.metadata} />
+                <DeckCardTile
+                  key={entry.key}
+                  card={entry.card}
+                  metadata={entry.metadata}
+                  deckName={entry.deckName}
+                />
               )
             ))}
           </div>
@@ -718,7 +723,11 @@ function CardTile({ card, onClick }: { card: EnrichedCard; onClick: () => void }
   )
 }
 
-function DeckCardTile({ card, metadata }: { card: MoxfieldDeckCard; metadata?: ScryfallCard }) {
+function DeckCardTile({ card, metadata, deckName }: {
+  card: MoxfieldDeckCard
+  metadata?: ScryfallCard
+  deckName: string
+}) {
   const imageUri = card.imageUriNormal ?? metadata?.image_uris?.normal ?? metadata?.card_faces?.[0]?.image_uris?.normal
   const scryfallId = card.scryfallId ?? metadata?.id
 
@@ -740,7 +749,7 @@ function DeckCardTile({ card, metadata }: { card: MoxfieldDeckCard; metadata?: S
       )}
       <div className="px-2 py-1.5">
         <span className="inline-flex rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-300">
-          Deck card
+          Deck · {deckName}
         </span>
         <p className="mt-1 text-white text-xs font-semibold truncate" title={card.name}>{card.name}</p>
         <div className="flex items-center justify-between mt-0.5">
