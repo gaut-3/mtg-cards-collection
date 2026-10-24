@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Search, SlidersHorizontal, Upload, X } from 'lucide-react'
 import { useAuthContext } from '../components/shared/AuthContext'
 import { useCollection } from '../hooks/useCollection'
 import { useMoxfieldDecks } from '../hooks/useMoxfieldDecks'
-import type { EnrichedCard } from '../types/scryfall'
+import { lookupCardsByName } from '../lib/scryfallClient'
+import type { EnrichedCard, ScryfallCard } from '../types/scryfall'
 import type { MoxfieldDeckCard } from '../types/moxfield'
 
 const RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4, bonus: 5 }
@@ -42,6 +43,26 @@ const FOIL_OPTIONS = [
 
 type SortKey = 'name' | 'price' | 'rarity' | 'cmc' | 'quantity'
 type GroupKey = 'none' | 'set' | 'color' | 'rarity' | 'type' | 'binder' | 'cmc'
+
+function deckCardGroup(card: ScryfallCard | undefined, deckName: string, groupBy: GroupKey) {
+  switch (groupBy) {
+    case 'set': return card?.set_name ?? 'Unknown set'
+    case 'color': {
+      const identity = card?.color_identity ?? []
+      if (identity.length === 0) return 'Colorless'
+      if (identity.length > 1) return 'Multicolor'
+      return COLOR_MAP[identity[0]] ?? identity[0]
+    }
+    case 'rarity': return card ? `${card.rarity.charAt(0).toUpperCase()}${card.rarity.slice(1)}` : 'Unknown rarity'
+    case 'type': {
+      const typeLine = card?.type_line ?? ''
+      return CARD_TYPES.find((type) => typeLine.includes(type)) ?? 'Other'
+    }
+    case 'binder': return `Deck: ${deckName}`
+    case 'cmc': return (card?.cmc ?? 0) >= 7 ? '7+' : String(Math.floor(card?.cmc ?? 0))
+    default: return ''
+  }
+}
 
 function cardPrice(card: EnrichedCard): number {
   if (card.foil !== 'normal') {
@@ -101,6 +122,7 @@ export default function Collection() {
   const { user } = useAuthContext()
   const { cards, loading, loadCollection } = useCollection(user?.uid ?? null)
   const { decks } = useMoxfieldDecks(user?.uid ?? null)
+  const [deckCardMetadata, setDeckCardMetadata] = useState<Map<string, ScryfallCard>>(new Map())
 
   const [search, setSearch] = useState('')
   const [filterColor, setFilterColor] = useState('')
@@ -118,14 +140,37 @@ export default function Collection() {
   const [showFilters, setShowFilters] = useState(false)
   const [selectedCard, setSelectedCard] = useState<EnrichedCard | null>(null)
 
+  useEffect(() => {
+    const names = [...new Set(decks.flatMap((deck) => deck.cards.map((card) => card.name)))]
+    if (names.length === 0) {
+      setDeckCardMetadata(new Map())
+      return
+    }
+
+    let cancelled = false
+    lookupCardsByName(names)
+      .then((metadata) => {
+        if (!cancelled) setDeckCardMetadata(metadata)
+      })
+      .catch((error) => console.warn('Could not load metadata for deck cards.', error))
+
+    return () => { cancelled = true }
+  }, [decks])
+
   const sets = useMemo(
-    () => [...new Set(cards.map((c) => c.setName))].sort().map((name) => ({ name })),
-    [cards]
+    () => [...new Set([
+      ...cards.map((card) => card.setName),
+      ...[...deckCardMetadata.values()].map((card) => card.set_name),
+    ].filter(Boolean))].sort().map((name) => ({ name })),
+    [cards, deckCardMetadata]
   )
 
   const binders = useMemo(
-    () => [...new Set(cards.map((c) => c.binderName).filter(Boolean))].sort(),
-    [cards]
+    () => [...new Set([
+      ...cards.map((card) => card.binderName).filter(Boolean),
+      ...decks.map((deck) => `Deck: ${deck.name}`),
+    ])].sort(),
+    [cards, decks]
   )
 
   const filtered = useMemo(() => {
@@ -196,6 +241,64 @@ export default function Collection() {
     const sortedKeys = sortGroups([...map.keys()], groupBy)
     return sortedKeys.map((label) => ({ label, cards: map.get(label)! }))
   }, [filtered, groupBy])
+
+  const filteredDecks = useMemo(() => decks.map((deck) => {
+    const query = search.trim().toLowerCase()
+    const deckNameMatches = !query || deck.name.toLowerCase().includes(query)
+    const deckCards = deck.cards
+      .map((card, index) => ({
+        card,
+        index,
+        metadata: deckCardMetadata.get(card.name.toLowerCase()),
+      }))
+      .filter(({ card, metadata }) => {
+        const searchMatches = deckNameMatches || [
+          card.name,
+          metadata?.type_line ?? '',
+          metadata?.oracle_text ?? metadata?.card_faces?.[0]?.oracle_text ?? '',
+        ].some((value) => value.toLowerCase().includes(query))
+        if (query && !searchMatches) return false
+        if (filterColor && !metadata?.color_identity.includes(filterColor)) return false
+        if (filterRarity && metadata?.rarity !== filterRarity) return false
+        if (filterSets.size > 0 && (!metadata || !filterSets.has(metadata.set_name))) return false
+        if (filterType && !metadata?.type_line.includes(filterType)) return false
+        if (filterCmcMin !== '' && (metadata?.cmc ?? -1) < parseFloat(filterCmcMin)) return false
+        if (filterCmcMax !== '' && (metadata?.cmc ?? Number.POSITIVE_INFINITY) > parseFloat(filterCmcMax)) return false
+        if (filterFoil && filterFoil !== 'normal') return false
+        if (filterFormat && metadata?.legalities[filterFormat] !== 'legal') return false
+        if (filterBinder && filterBinder !== `Deck: ${deck.name}`) return false
+        return true
+      })
+      .sort((a, b) => {
+        let cmp = 0
+        if (sortKey === 'name') cmp = a.card.name.localeCompare(b.card.name)
+        else if (sortKey === 'price') {
+          cmp = parseFloat(a.metadata?.prices.usd ?? '0') - parseFloat(b.metadata?.prices.usd ?? '0')
+        } else if (sortKey === 'rarity') {
+          cmp = (RARITY_ORDER[a.metadata?.rarity ?? 'common'] ?? 0) - (RARITY_ORDER[b.metadata?.rarity ?? 'common'] ?? 0)
+        } else if (sortKey === 'cmc') cmp = (a.metadata?.cmc ?? 0) - (b.metadata?.cmc ?? 0)
+        else if (sortKey === 'quantity') cmp = a.card.quantity - b.card.quantity
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+
+    const groups = new Map<string, typeof deckCards>()
+    for (const entry of deckCards) {
+      const group = deckCardGroup(entry.metadata, deck.name, groupBy)
+      if (!groups.has(group)) groups.set(group, [])
+      groups.get(group)!.push(entry)
+    }
+    const groupNames = groupBy === 'none' ? [''] : sortGroups([...groups.keys()], groupBy)
+    const groupedCards = groupNames.map((label) => ({
+      label,
+      cards: groupBy === 'none' ? deckCards : groups.get(label) ?? [],
+    }))
+
+    return { ...deck, cards: deckCards, groupedCards }
+  }), [
+    decks, deckCardMetadata, search, filterColor, filterRarity, filterSets,
+    filterType, filterCmcMin, filterCmcMax, filterFoil, filterFormat,
+    filterBinder, sortKey, sortDir, groupBy,
+  ])
 
   const totalUsd = filtered.reduce((s, c) => s + cardPrice(c) * c.quantity, 0)
 
@@ -529,24 +632,35 @@ export default function Collection() {
             </span>
           </div>
           <div className="space-y-8">
-            {decks.map((deck) => {
-              const query = search.trim().toLowerCase()
-              const deckMatches = !query || deck.name.toLowerCase().includes(query)
-              const deckCards = deck.cards.filter((card) =>
-                deckMatches || card.name.toLowerCase().includes(query)
-              )
-              if (deckCards.length === 0) return null
-
+            {filteredDecks.map((deck) => {
+              if (deck.cards.length === 0) return null
               return (
                 <div key={deck.id}>
                   <div className="flex items-center gap-3 mb-3">
                     <h3 className="text-amber-200 font-medium text-sm">{deck.name}</h3>
                     <div className="flex-1 h-px bg-gray-800" />
-                    <span className="text-gray-600 text-xs">{deckCards.length} cards</span>
+                    <span className="text-gray-600 text-xs">{deck.cards.length} cards</span>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                    {deckCards.map((card, index) => (
-                      <DeckCardTile key={`${deck.id}-${card.scryfallId ?? card.name}-${index}`} card={card} />
+                  <div className="space-y-5">
+                    {deck.groupedCards.map((group) => (
+                      <div key={`${deck.id}-${group.label}`}>
+                        {groupBy !== 'none' && (
+                          <div className="flex items-center gap-3 mb-3">
+                            <span className="text-gray-300 font-medium text-xs">{group.label}</span>
+                            <div className="flex-1 h-px bg-gray-800" />
+                            <span className="text-gray-600 text-xs">{group.cards.length} cards</span>
+                          </div>
+                        )}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                          {group.cards.map(({ card, index, metadata }) => (
+                            <DeckCardTile
+                              key={`${deck.id}-${card.scryfallId ?? card.name}-${index}`}
+                              card={card}
+                              metadata={metadata}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -599,13 +713,16 @@ function CardTile({ card, onClick }: { card: EnrichedCard; onClick: () => void }
   )
 }
 
-function DeckCardTile({ card }: { card: MoxfieldDeckCard }) {
+function DeckCardTile({ card, metadata }: { card: MoxfieldDeckCard; metadata?: ScryfallCard }) {
+  const imageUri = card.imageUriNormal ?? metadata?.image_uris?.normal ?? metadata?.card_faces?.[0]?.image_uris?.normal
+  const scryfallId = card.scryfallId ?? metadata?.id
+
   return (
     <div className="group rounded-xl overflow-hidden bg-gray-900 border-2 border-amber-500/70 shadow shadow-amber-950/30">
-      {card.scryfallId && card.imageUriNormal ? (
-        <a href={`https://scryfall.com/card/${card.scryfallId}`} target="_blank" rel="noopener noreferrer">
+      {scryfallId && imageUri ? (
+        <a href={`https://scryfall.com/card/${scryfallId}`} target="_blank" rel="noopener noreferrer">
           <img
-            src={card.imageUriNormal}
+            src={imageUri}
             alt={card.name}
             loading="lazy"
             className="w-full object-cover aspect-[5/7] group-hover:scale-105 transition duration-300"
