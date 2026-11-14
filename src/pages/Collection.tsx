@@ -12,6 +12,10 @@ const RARITY_ORDER = { common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4, b
 const COLOR_MAP: Record<string, string> = {
   W: 'White', U: 'Blue', B: 'Black', R: 'Red', G: 'Green',
 }
+const COLOR_FILTER_OPTIONS = [
+  ...Object.entries(COLOR_MAP).map(([value, label]) => ({ value, label })),
+  { value: 'C', label: 'Colorless' },
+]
 
 const RARITY_COLORS: Record<string, string> = {
   common: 'text-gray-400',
@@ -62,6 +66,17 @@ function deckCardGroup(card: ScryfallCard | undefined, deckName: string, groupBy
     case 'cmc': return (card?.cmc ?? 0) >= 7 ? '7+' : String(Math.floor(card?.cmc ?? 0))
     default: return ''
   }
+}
+
+function matchesColorIdentity(identity: string[], selected: Set<string>, exact: boolean) {
+  if (selected.size === 0) return true
+  if (selected.has('C')) return selected.size === 1 && identity.length === 0
+
+  const requiredColors = [...selected]
+  if (exact) {
+    return identity.length === requiredColors.length && requiredColors.every((color) => identity.includes(color))
+  }
+  return requiredColors.every((color) => identity.includes(color))
 }
 
 function cardPrice(card: EnrichedCard): number {
@@ -125,7 +140,8 @@ export default function Collection() {
   const [deckCardMetadata, setDeckCardMetadata] = useState<Map<string, ScryfallCard>>(new Map())
 
   const [search, setSearch] = useState('')
-  const [filterColor, setFilterColor] = useState('')
+  const [filterColors, setFilterColors] = useState<Set<string>>(new Set())
+  const [filterExactColors, setFilterExactColors] = useState<Set<string>>(new Set())
   const [filterRarity, setFilterRarity] = useState('')
   const [filterSets, setFilterSets] = useState<Set<string>>(new Set())
   const [filterType, setFilterType] = useState('')
@@ -185,9 +201,10 @@ export default function Collection() {
           c.oracleText.toLowerCase().includes(q)
       )
     }
-    if (filterColor) {
-      result = result.filter((c) => c.colorIdentity.includes(filterColor))
-    }
+    result = result.filter((card) =>
+      matchesColorIdentity(card.colorIdentity, filterColors, false) &&
+      matchesColorIdentity(card.colorIdentity, filterExactColors, true)
+    )
     if (filterRarity) {
       result = result.filter((c) => c.rarity === filterRarity)
     }
@@ -225,7 +242,7 @@ export default function Collection() {
     })
 
     return result
-  }, [cards, search, filterColor, filterRarity, filterSets, filterType,
+  }, [cards, search, filterColors, filterExactColors, filterRarity, filterSets, filterType,
       filterCmcMin, filterCmcMax, filterFoil, filterFormat, filterBinder,
       sortKey, sortDir])
 
@@ -244,7 +261,9 @@ export default function Collection() {
           metadata?.oracle_text ?? metadata?.card_faces?.[0]?.oracle_text ?? '',
         ].some((value) => value.toLowerCase().includes(query))
         if (query && !searchMatches) return false
-        if (filterColor && !metadata?.color_identity.includes(filterColor)) return false
+        const colorIdentity = metadata?.color_identity ?? []
+        if (!matchesColorIdentity(colorIdentity, filterColors, false)) return false
+        if (!matchesColorIdentity(colorIdentity, filterExactColors, true)) return false
         if (filterRarity && metadata?.rarity !== filterRarity) return false
         if (filterSets.size > 0 && (!metadata || !filterSets.has(metadata.set_name))) return false
         if (filterType && !metadata?.type_line.includes(filterType)) return false
@@ -281,7 +300,7 @@ export default function Collection() {
 
     return { ...deck, cards: deckCards, groupedCards }
   }), [
-    decks, deckCardMetadata, search, filterColor, filterRarity, filterSets,
+    decks, deckCardMetadata, search, filterColors, filterExactColors, filterRarity, filterSets,
     filterType, filterCmcMin, filterCmcMax, filterFoil, filterFormat,
     filterBinder, sortKey, sortDir, groupBy,
   ])
@@ -349,14 +368,17 @@ export default function Collection() {
   const displayedCardCount = filtered.length + deckCardCount
 
   const activeFilterCount = [
-    filterColor, filterRarity, filterType, filterFoil, filterFormat, filterBinder,
+    filterRarity, filterType, filterFoil, filterFormat, filterBinder,
   ].filter(Boolean).length +
+    (filterColors.size > 0 ? 1 : 0) +
+    (filterExactColors.size > 0 ? 1 : 0) +
     (filterSets.size > 0 ? 1 : 0) +
     (filterCmcMin !== '' || filterCmcMax !== '' ? 1 : 0)
 
   const clearAll = () => {
     setSearch('')
-    setFilterColor('')
+    setFilterColors(new Set())
+    setFilterExactColors(new Set())
     setFilterRarity('')
     setFilterSets(new Set())
     setFilterType('')
@@ -458,16 +480,68 @@ export default function Collection() {
       {showFilters && (
         <div className="flex flex-wrap gap-4 mb-4 p-4 bg-gray-900 border border-gray-800 rounded-xl">
 
-          {/* Color */}
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Color</label>
-            <select value={filterColor} onChange={(e) => setFilterColor(e.target.value)} className={selectClass}>
-              <option value="">All</option>
-              {Object.entries(COLOR_MAP).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+          {/* Contains all selected colors */}
+          <div className="min-w-56">
+            <label className="block text-xs text-gray-500 mb-1">Contains all colors</label>
+            <div className="flex flex-wrap gap-1">
+              {COLOR_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setFilterColors((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(value)) next.delete(value)
+                    else next.add(value)
+                    return next
+                  })}
+                  className={`px-2 py-1 rounded-md text-xs transition ${
+                    filterColors.has(value)
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                  aria-pressed={filterColors.has(value)}
+                >
+                  {label}
+                </button>
               ))}
-              <option value="C">Colorless</option>
-            </select>
+              {filterColors.size > 0 && (
+                <button onClick={() => setFilterColors(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-white">
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-gray-600 text-xs mt-1">Cards may also have other colors.</p>
+          </div>
+
+          {/* Exact color identity */}
+          <div className="min-w-56">
+            <label className="block text-xs text-gray-500 mb-1">Exact color identity</label>
+            <div className="flex flex-wrap gap-1">
+              {COLOR_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setFilterExactColors((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(value)) next.delete(value)
+                    else next.add(value)
+                    return next
+                  })}
+                  className={`px-2 py-1 rounded-md text-xs transition ${
+                    filterExactColors.has(value)
+                      ? 'bg-violet-600 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                  aria-pressed={filterExactColors.has(value)}
+                >
+                  {label}
+                </button>
+              ))}
+              {filterExactColors.size > 0 && (
+                <button onClick={() => setFilterExactColors(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-white">
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-gray-600 text-xs mt-1">Only the selected colors; White + Blue matches exactly WU.</p>
           </div>
 
           {/* Rarity */}
