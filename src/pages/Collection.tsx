@@ -79,6 +79,11 @@ function matchesColorIdentity(identity: string[], selected: Set<string>, exact: 
   return requiredColors.every((color) => identity.includes(color))
 }
 
+function excludesColorIdentity(identity: string[], excluded: Set<string>) {
+  if (excluded.has('C') && identity.length === 0) return true
+  return [...excluded].some((color) => color !== 'C' && identity.includes(color))
+}
+
 function cardPrice(card: EnrichedCard): number {
   if (card.foil !== 'normal') {
     return parseFloat(card.prices.usd_foil ?? card.prices.usd ?? '0')
@@ -142,6 +147,7 @@ export default function Collection() {
   const [search, setSearch] = useState('')
   const [filterColors, setFilterColors] = useState<Set<string>>(new Set())
   const [filterExactColors, setFilterExactColors] = useState<Set<string>>(new Set())
+  const [excludedColors, setExcludedColors] = useState<Set<string>>(new Set())
   const [filterRarity, setFilterRarity] = useState('')
   const [filterSets, setFilterSets] = useState<Set<string>>(new Set())
   const [filterType, setFilterType] = useState('')
@@ -203,7 +209,8 @@ export default function Collection() {
     }
     result = result.filter((card) =>
       matchesColorIdentity(card.colorIdentity, filterColors, false) &&
-      matchesColorIdentity(card.colorIdentity, filterExactColors, true)
+      matchesColorIdentity(card.colorIdentity, filterExactColors, true) &&
+      !excludesColorIdentity(card.colorIdentity, excludedColors)
     )
     if (filterRarity) {
       result = result.filter((c) => c.rarity === filterRarity)
@@ -242,7 +249,7 @@ export default function Collection() {
     })
 
     return result
-  }, [cards, search, filterColors, filterExactColors, filterRarity, filterSets, filterType,
+  }, [cards, search, filterColors, filterExactColors, excludedColors, filterRarity, filterSets, filterType,
       filterCmcMin, filterCmcMax, filterFoil, filterFormat, filterBinder,
       sortKey, sortDir])
 
@@ -264,6 +271,7 @@ export default function Collection() {
         const colorIdentity = metadata?.color_identity ?? []
         if (!matchesColorIdentity(colorIdentity, filterColors, false)) return false
         if (!matchesColorIdentity(colorIdentity, filterExactColors, true)) return false
+        if (excludesColorIdentity(colorIdentity, excludedColors)) return false
         if (filterRarity && metadata?.rarity !== filterRarity) return false
         if (filterSets.size > 0 && (!metadata || !filterSets.has(metadata.set_name))) return false
         if (filterType && !metadata?.type_line.includes(filterType)) return false
@@ -300,7 +308,7 @@ export default function Collection() {
 
     return { ...deck, cards: deckCards, groupedCards }
   }), [
-    decks, deckCardMetadata, search, filterColors, filterExactColors, filterRarity, filterSets,
+    decks, deckCardMetadata, search, filterColors, filterExactColors, excludedColors, filterRarity, filterSets,
     filterType, filterCmcMin, filterCmcMax, filterFoil, filterFormat,
     filterBinder, sortKey, sortDir, groupBy,
   ])
@@ -372,6 +380,7 @@ export default function Collection() {
   ].filter(Boolean).length +
     (filterColors.size > 0 ? 1 : 0) +
     (filterExactColors.size > 0 ? 1 : 0) +
+    (excludedColors.size > 0 ? 1 : 0) +
     (filterSets.size > 0 ? 1 : 0) +
     (filterCmcMin !== '' || filterCmcMax !== '' ? 1 : 0)
 
@@ -379,6 +388,7 @@ export default function Collection() {
     setSearch('')
     setFilterColors(new Set())
     setFilterExactColors(new Set())
+    setExcludedColors(new Set())
     setFilterRarity('')
     setFilterSets(new Set())
     setFilterType('')
@@ -542,6 +552,38 @@ export default function Collection() {
               )}
             </div>
             <p className="text-gray-600 text-xs mt-1">Only the selected colors; White + Blue matches exactly WU.</p>
+          </div>
+
+          {/* Excluded colors */}
+          <div className="min-w-56">
+            <label className="block text-xs text-gray-500 mb-1">Exclude colors</label>
+            <div className="flex flex-wrap gap-1">
+              {COLOR_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => setExcludedColors((prev) => {
+                    const next = new Set(prev)
+                    if (next.has(value)) next.delete(value)
+                    else next.add(value)
+                    return next
+                  })}
+                  className={`px-2 py-1 rounded-md text-xs transition ${
+                    excludedColors.has(value)
+                      ? 'bg-red-700 text-white'
+                      : 'bg-gray-800 text-gray-400 hover:text-white'
+                  }`}
+                  aria-pressed={excludedColors.has(value)}
+                >
+                  {label}
+                </button>
+              ))}
+              {excludedColors.size > 0 && (
+                <button onClick={() => setExcludedColors(new Set())} className="px-2 py-1 text-xs text-gray-500 hover:text-white">
+                  Clear
+                </button>
+              )}
+            </div>
+            <p className="text-gray-600 text-xs mt-1">Hides cards containing any selected color.</p>
           </div>
 
           {/* Rarity */}
